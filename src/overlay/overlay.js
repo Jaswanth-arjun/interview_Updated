@@ -253,8 +253,10 @@ async function startListening(isAutoRestart = false) {
         avgMic = micDataArray.reduce((a, b) => a + b, 0) / micDataArray.length;
       }
 
-      const MIC_TALKING_THRESHOLD = 15;
-      if (avgMic > MIC_TALKING_THRESHOLD) {
+      // Only flag as user speaking if mic is loud AND system audio is quiet (to avoid speaker echo)
+      const MIC_TALKING_THRESHOLD = 18;
+      const SYSTEM_SILENT_THRESHOLD = 5;
+      if (avgMic > MIC_TALKING_THRESHOLD && avg < SYSTEM_SILENT_THRESHOLD) {
         hasUserSpoken = true;
       }
 
