@@ -10,74 +10,185 @@ const {
   dialog,
   nativeImage,
   desktopCapturer,
+  shell
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+const http = require('http');
+const crypto = require('crypto');
+const { execSync } = require('child_process');
+
+const BACKEND_URL = 'http://localhost:4000';
+const sessionPath = path.join(app.getPath('userData'), 'session-auth.json');
 
 // ─── State ───────────────────────────────────────────────────────
 let setupWindow = null;
 let overlayWindow = null;
 let tray = null;
 let isOverlayVisible = false;
-let profileData = {};
 
-// ─── Multi-Key Round Robin ───────────────────────────────────────
-const API_KEYS = [
-  process.env.GEMINI_API_KEY_1,
-  process.env.GEMINI_API_KEY_2,
-  process.env.GEMINI_API_KEY_3,
-].filter((k) => k && !k.startsWith('your_'));  // Only keep real keys
+// Session structure: { accessToken: '', refreshToken: '', user: null, isDemo: false }
+let sessionData = {
+  accessToken: '',
+  refreshToken: '',
+  user: null,
+  isDemo: false
+};
 
-let currentKeyIndex = 0;
-console.log(`✓ Loaded ${API_KEYS.length} Gemini API key(s)`);
-console.log(process.env.GROQ_API_KEY && !process.env.GROQ_API_KEY.startsWith('your_') ? '✓ Loaded Groq API key' : '✗ No Groq API key loaded');
-console.log(process.env.OMNI_ROUTE_API_KEY && !process.env.OMNI_ROUTE_API_KEY.startsWith('your_') ? '✓ Loaded OmniRoute API key' : '✗ No OmniRoute API key loaded');
-
-function getNextKey() {
-  if (API_KEYS.length === 0) return null;
-  const key = API_KEYS[currentKeyIndex];
-  currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length;
-  return key;
-}
-
-// ─── Resilient Fetch (auto-retry on network failures) ────────────
-async function fetchWithRetry(url, options = {}, { retries = 2, timeoutMs = 15000, retryDelayMs = 1000 } = {}) {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetch(url, { ...options, signal: controller.signal });
-      clearTimeout(timer);
-      return response;
-    } catch (err) {
-      clearTimeout(timer);
-      const isLastAttempt = attempt === retries;
-      const isNetworkError = err.name === 'AbortError' || err.message?.includes('fetch failed') || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT';
-      if (isLastAttempt || !isNetworkError) throw err;
-      console.log(`⟳ Network error on attempt ${attempt + 1}/${retries + 1}, retrying in ${retryDelayMs}ms...`);
-      await new Promise(r => setTimeout(r, retryDelayMs));
-    }
-  }
-}
-
-const storePath = path.join(app.getPath('userData'), 'profile-data.json');
-
-// ─── Data Persistence ────────────────────────────────────────────
-function loadProfileData() {
+// ─── Session Management ──────────────────────────────────────────
+function loadSession() {
   try {
-    if (fs.existsSync(storePath)) {
-      profileData = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
+    if (fs.existsSync(sessionPath)) {
+      sessionData = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
+      console.log('✓ Session loaded from storage');
     }
   } catch (e) {
-    console.error('Failed to load profile data:', e);
-    profileData = {};
+    console.error('Failed to load session:', e);
   }
 }
 
-function saveProfileData(data) {
-  profileData = data;
-  fs.writeFileSync(storePath, JSON.stringify(data, null, 2));
+function saveSession(data) {
+  if (data) {
+    sessionData = {
+      accessToken: data.accessToken || '',
+      refreshToken: data.refreshToken || '',
+      user: data.user || null,
+      isDemo: false
+    };
+  }
+  try {
+    fs.writeFileSync(sessionPath, JSON.stringify(sessionData, null, 2));
+  } catch (e) {
+    console.error('Failed to save session:', e);
+  }
+}
+
+function clearSession() {
+  sessionData = {
+    accessToken: '',
+    refreshToken: '',
+    user: null,
+    isDemo: false
+  };
+  try {
+    if (fs.existsSync(sessionPath)) {
+      fs.unlinkSync(sessionPath);
+    }
+  } catch (e) {}
+}
+
+// ─── Machine Fingerprinting (Multi-Signal) ───────────────────────
+function getDeviceSignals() {
+  const signals = {
+    biosUuid: '',
+    cpuId: '',
+    diskSerial: '',
+    machineGuid: '',
+    platform: process.platform
+  };
+
+  if (process.platform === 'win32') {
+    try {
+      signals.biosUuid = execSync('powershell -Command "(Get-CimInstance Win32_ComputerSystemProduct).UUID"').toString().trim();
+    } catch {
+      try { signals.biosUuid = execSync('wmic csproduct get uuid').toString().replace('UUID', '').trim(); } catch {}
+    }
+    try {
+      signals.cpuId = execSync('powershell -Command "(Get-CimInstance Win32_Processor).ProcessorId"').toString().trim();
+    } catch {
+      try { signals.cpuId = execSync('wmic cpu get processorid').toString().replace('ProcessorId', '').trim(); } catch {}
+    }
+    try {
+      // Fetch physical media disk serial
+      signals.diskSerial = execSync('powershell -Command "(Get-CimInstance Win32_PhysicalMedia)[0].SerialNumber"').toString().trim();
+    } catch {
+      try { 
+        const raw = execSync('wmic diskdrive get serialnumber').toString();
+        signals.diskSerial = raw.replace('SerialNumber', '').trim().split(/\r?\n/)[0] || '';
+      } catch {}
+    }
+    try {
+      signals.machineGuid = execSync('powershell -Command "(Get-ItemProperty -Path HKLM:\\SOFTWARE\\Microsoft\\Cryptography).MachineGuid"').toString().trim();
+    } catch {}
+  } else if (process.platform === 'darwin') {
+    try {
+      signals.biosUuid = execSync("ioreg -rd1 -c IOPlatformExpertDevice | awk '/IOPlatformUUID/ { print $4 }'").toString().replace(/"/g, '').trim();
+    } catch {}
+  } else {
+    try {
+      signals.biosUuid = execSync('cat /var/lib/dbus/machine-id').toString().trim();
+    } catch {}
+  }
+
+  // Fallback to random GUID stored in user folder if completely blocked
+  if (!signals.biosUuid && !signals.cpuId && !signals.diskSerial) {
+    const fallbackFile = path.join(app.getPath('userData'), '.device-guid');
+    if (fs.existsSync(fallbackFile)) {
+      signals.biosUuid = fs.readFileSync(fallbackFile, 'utf8');
+    } else {
+      const generated = crypto.randomUUID();
+      fs.writeFileSync(fallbackFile, generated, 'utf8');
+      signals.biosUuid = generated;
+    }
+  }
+
+  return signals;
+}
+
+function getDeviceFingerprint() {
+  const s = getDeviceSignals();
+  const parts = [s.biosUuid, s.cpuId, s.diskSerial, s.machineGuid, s.platform]
+    .filter(Boolean)
+    .map(p => p.trim().toLowerCase());
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
+}
+
+// ─── API Fetch (Automatic Refresh Handling) ──────────────────────
+async function apiFetch(endpoint, options = {}) {
+  const url = `${BACKEND_URL}${endpoint}`;
+  options.headers = options.headers || {};
+  
+  if (sessionData.accessToken && !sessionData.isDemo) {
+    options.headers['Authorization'] = `Bearer ${sessionData.accessToken}`;
+  } else if (sessionData.isDemo) {
+    options.headers['Authorization'] = 'Bearer demo';
+  }
+
+  try {
+    let response = await fetch(url, options);
+    
+    // Auto token refresh on 401 Unauthorized
+    if (response.status === 401 && sessionData.refreshToken && !sessionData.isDemo) {
+      console.log('Access token expired, attempting refresh...');
+      const refreshResponse = await fetch(`${BACKEND_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: sessionData.refreshToken })
+      });
+
+      if (refreshResponse.ok) {
+        const refreshData = await refreshResponse.json();
+        if (refreshData.success) {
+          sessionData.accessToken = refreshData.accessToken;
+          sessionData.refreshToken = refreshData.refreshToken;
+          saveSession();
+          
+          // Retry the request with the new access token
+          options.headers['Authorization'] = `Bearer ${sessionData.accessToken}`;
+          response = await fetch(url, options);
+        } else {
+          clearSession();
+        }
+      } else {
+        clearSession();
+      }
+    }
+
+    return response;
+  } catch (err) {
+    console.error(`apiFetch failed for ${endpoint}:`, err);
+    throw err;
+  }
 }
 
 // ─── Windows ─────────────────────────────────────────────────────
@@ -111,7 +222,8 @@ function createOverlayWindow() {
     x: width - 510,
     y: 40,
     frame: false,
-    transparent: true,
+    transparent: false,
+    backgroundColor: '#08081a',
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: true,
@@ -126,6 +238,7 @@ function createOverlayWindow() {
 
   overlayWindow.loadFile(path.join(__dirname, 'src/overlay/overlay.html'));
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  overlayWindow.setContentProtection(true);
 }
 
 function toggleOverlay() {
@@ -140,13 +253,11 @@ function toggleOverlay() {
 
 // ─── Tray ────────────────────────────────────────────────────────
 function createTrayIcon() {
-  // Create a 16x16 indigo icon programmatically (BGRA format)
   const size = 16;
   const buf = Buffer.alloc(size * size * 4);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const i = (y * size + x) * 4;
-      // Create a subtle gradient from indigo to cyan
       const ratio = (x + y) / (size * 2);
       buf[i]     = Math.round(99  + ratio * (6   - 99));  // R
       buf[i + 1] = Math.round(102 + ratio * (182 - 102)); // G
@@ -190,123 +301,426 @@ function createTray() {
   });
 }
 
-
-
-// ─── Prompt Builder ──────────────────────────────────────────────
-function buildPrompt(question) {
-  const d = profileData;
-  const candidateContext = `TARGET JOB DETAILS:
-- Role: ${d.roleName || 'Not specified'}
-- Company: ${d.companyName || 'Not specified'}
-- Target Job Description: ${d.jobDescription || 'Not provided'}
-
-DETAILED RESUME CONTENT:
-${d.resumeText || 'Not provided'}
-
-DETAILED PROJECTS, SKILLS, & ACHIEVEMENTS:
-${d.projects || 'Not provided'}
-
-EXTRA CANDIDATE NOTES:
-${d.extraNotes || 'Not provided'}`;
-
-  return `You are a candidate in a live interview. Answer: "${question}"
-
-RULES:
-- SUBJECT/TECHNICAL questions: explain the concept directly using your knowledge. Do NOT reference your resume or projects unless asked about your experience.
-- RESUME/PROJECT questions: answer using ONLY facts from the candidate context below. Never invent details.
-- Speak first person, natural, conversational. 3-5 sentences max.
-- NO bullet points, NO markdown, NO lists, NO filler like "Sure" or "Certainly".
-- Start answering immediately as the candidate.
-
-─── CONTEXT ───
-Role: ${d.roleName || 'N/A'} at ${d.companyName || 'N/A'}
-JD: ${d.jobDescription || 'N/A'}
-Resume: ${d.resumeText || 'N/A'}
-Projects: ${d.projects || 'N/A'}
-Notes: ${d.extraNotes || 'N/A'}
-───────────────
-Answer now:`;
-}
-function cleanTranscriptionText(text) {
-  if (!text) return '';
-  
-  // 1. If the transcription is just a common silent audio hallucination, suppress it.
-  const lower = text.toLowerCase().trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
-  const hallucinations = [
-    "thank you",
-    "thank you thank you",
-    "thank you very much",
-    "thank you for watching",
-    "subtitles by yify",
-    "please subscribe",
-    "subscribe to my channel",
-    "reformatted by",
-    "you"
-  ];
-  if (hallucinations.includes(lower)) {
-    return '';
+// ─── Google OAuth 2.0 Loopback Listener ─────────────────────────
+let oauthServer = null;
+function startOauthListener(resolve) {
+  if (oauthServer) {
+    try { oauthServer.close(); } catch {}
   }
 
-  // 2. Remove continuous repeated words (e.g., "you you you you" or "thank thank thank")
-  let cleaned = text.replace(/\b(\w+)(?:\s+\1)+\b/gi, '$1');
-  
-  // 3. Remove repeated sentences or phrases (e.g., "Thank you. Thank you.")
-  const sentences = cleaned.split(/(?<=[.!?])\s+/);
-  const deduplicatedSentences = [];
-  let lastSentence = "";
-  let repeatCount = 0;
-  for (const sentence of sentences) {
-    const norm = sentence.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
-    const normLast = lastSentence.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
-    if (norm === normLast) {
-      repeatCount++;
-      if (repeatCount < 1) {
-        deduplicatedSentences.push(sentence);
+  oauthServer = http.createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://localhost:52981');
+    if (url.pathname === '/oauth-callback') {
+      const code = url.searchParams.get('code');
+      if (!code) {
+        res.end('Authentication code missing');
+        resolve({ success: false, error: 'Authentication code missing' });
+        return;
+      }
+
+      try {
+        const signals = getDeviceSignals();
+        const fprint = getDeviceFingerprint();
+
+        const response = await fetch(`${BACKEND_URL}/auth/google/callback`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code,
+            deviceFingerprint: fprint,
+            ...signals
+          })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          saveSession(data);
+          res.end(`
+            <html>
+              <body style="font-family: sans-serif; text-align: center; padding-top: 50px; background: #08081a; color: #fff;">
+                <h2 style="color: #4ade80;">Login Successful!</h2>
+                <p>Authenticating desktop assistant, please wait...</p>
+              </body>
+            </html>
+          `);
+          resolve({ success: true, user: data.user });
+        } else {
+          res.end(`
+            <html>
+              <body style="font-family: sans-serif; text-align: center; padding-top: 50px; background: #08081a; color: #fff;">
+                <h2 style="color: #ef4444;">Login Failed</h2>
+                <p>Error: ${data.error || 'Unknown error'}</p>
+              </body>
+            </html>
+          `);
+          resolve({ success: false, error: data.error });
+        }
+      } catch (err) {
+        res.end('Authentication failed during callback request');
+        resolve({ success: false, error: err.message });
       }
     } else {
-      deduplicatedSentences.push(sentence);
-      lastSentence = sentence;
-      repeatCount = 0;
+      res.end('Not found');
     }
-  }
-  cleaned = deduplicatedSentences.join(' ').trim();
-  
-  // 4. Repeatedly strip leading/trailing Whisper hallucination / silence loop phrases from the actual question
-  let cleanText = cleaned.trim();
-  let prev;
-  do {
-    prev = cleanText;
-    cleanText = cleanText.replace(/^(thank you|thanks|you|please subscribe|subscribe|thank you very much|reformatted by|subtitles by yify)[.,\s!?]*/gi, '');
-  } while (cleanText !== prev);
+  });
 
-  cleaned = cleanText.trim();
+  oauthServer.listen(52981, '127.0.0.1', () => {
+    console.log('Google Auth loopback server listening on port 52981');
+  });
 
-  // 5. If the remaining text is just a bunch of repeated short words (like "you you"), clear it
-  const words = cleaned.toLowerCase().split(/\s+/);
-  const uniqueWords = new Set(words);
-  if (words.length > 5 && uniqueWords.size === 1) {
-    return '';
-  }
-  if (words.length > 5 && uniqueWords.size === 2 && (uniqueWords.has('thank') || uniqueWords.has('you') || uniqueWords.has('thanks'))) {
-    return '';
-  }
-
-  return cleaned;
+  // 3-minute handshake timeout
+  setTimeout(() => {
+    if (oauthServer) {
+      try { oauthServer.close(); } catch {}
+      oauthServer = null;
+    }
+  }, 180000);
 }
 
 // ─── IPC Handlers ────────────────────────────────────────────────
 function registerIPC() {
-  ipcMain.handle('save-setup-data', async (_e, data) => {
-    // Save raw details
-    saveProfileData(data);
+  ipcMain.handle('get-machine-id', async () => {
+    return getDeviceFingerprint();
+  });
+
+  ipcMain.handle('get-user-profile', async () => {
+    if (sessionData.isDemo) {
+      return { success: true, email: 'Demo Mode', tier: 'demo', limit: 'Unlimited' };
+    }
+    if (!sessionData.accessToken) {
+      return { success: false, error: 'No active session' };
+    }
+    try {
+      const response = await apiFetch('/auth/profile');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          sessionData.user = data.user;
+          return {
+            success: true,
+            email: data.user.email,
+            name: data.user.name,
+            avatarUrl: data.user.avatarUrl,
+            tier: data.user.tier,
+            freeTrialRequests: data.user.freeTrialRequests,
+            freeTrialUsed: data.user.freeTrialUsed,
+            walletBalancePaise: data.user.walletBalancePaise,
+            isAdmin: data.user.isAdmin
+          };
+        }
+      }
+      return { success: false, error: 'Session invalid' };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('login-user', async () => {
+    return { success: false, error: 'Password log-in is disabled. Please use Continue with Google.' };
+  });
+
+  ipcMain.handle('register-user', async () => {
+    return { success: false, error: 'Standard registration is disabled. Please use Continue with Google.' };
+  });
+
+  ipcMain.handle('logout-user', async () => {
+    try {
+      if (!sessionData.isDemo && sessionData.accessToken) {
+        await apiFetch('/auth/logout', { method: 'POST' });
+      }
+    } catch {}
+    clearSession();
     return { success: true };
   });
 
-  ipcMain.handle('get-setup-data', async () => {
-    loadProfileData();
-    return profileData;
+  ipcMain.handle('enter-demo-mode', async () => {
+    sessionData = {
+      accessToken: '',
+      refreshToken: '',
+      user: { email: 'Demo Mode', name: 'Demo Candidate', tier: 'demo' },
+      isDemo: true
+    };
+    saveSession();
+    return { success: true };
   });
 
+  ipcMain.handle('login-with-google', async () => {
+    return new Promise(async (resolve) => {
+      let authWindow = null;
+      let resolved = false;
+
+      const safeResolve = (val) => {
+        if (!resolved) {
+          resolved = true;
+          resolve(val);
+          
+          // Delay closing the login window and loopback server slightly to show success response page
+          setTimeout(() => {
+            if (authWindow && !authWindow.isDestroyed()) {
+              authWindow.close();
+            }
+            if (oauthServer) {
+              try { oauthServer.close(); } catch {}
+              oauthServer = null;
+            }
+          }, 1200);
+        }
+      };
+
+      try {
+        startOauthListener(safeResolve);
+        const response = await fetch(`${BACKEND_URL}/auth/google/url`);
+        const data = await response.json();
+        if (data.success && data.url) {
+          // Open a modal popup window on top of Setup window
+          authWindow = new BrowserWindow({
+            width: 580,
+            height: 680,
+            parent: setupWindow || undefined,
+            modal: true,
+            frame: true,
+            show: false,
+            webPreferences: {
+              nodeIntegration: false,
+              contextIsolation: true,
+            }
+          });
+
+          // Set User-Agent headers to standard Chrome desktop agent to satisfy Google OAuth requirements
+          authWindow.webContents.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+
+          authWindow.loadURL(data.url);
+          authWindow.once('ready-to-show', () => {
+            if (authWindow && !authWindow.isDestroyed()) {
+              authWindow.show();
+            }
+          });
+
+          authWindow.on('closed', () => {
+            safeResolve({ success: false, error: 'Login window was closed by user' });
+          });
+        } else {
+          safeResolve({ success: false, error: 'Failed to retrieve auth URL' });
+        }
+      } catch (err) {
+        safeResolve({ success: false, error: err.message });
+      }
+    });
+  });
+
+  // Profile data
+  ipcMain.handle('save-setup-data', async (_e, data) => {
+    if (sessionData.isDemo) return { success: true };
+    try {
+      const response = await apiFetch('/profile/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('get-setup-data', async () => {
+    if (sessionData.isDemo) return {};
+    try {
+      const response = await apiFetch('/profile/setup');
+      if (response.ok) {
+        const data = await response.json();
+        return data.profile || {};
+      }
+      return {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Razorpay Payments
+  ipcMain.handle('get-recharge-tiers', async () => {
+    try {
+      const response = await apiFetch('/wallet/tiers');
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('create-razorpay-order', async (_e, amountPaise) => {
+    try {
+      const response = await apiFetch('/wallet/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountPaise })
+      });
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('verify-razorpay-payment', async (_e, paymentDetails) => {
+    try {
+      const response = await apiFetch('/wallet/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(paymentDetails)
+      });
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('get-payment-history', async () => {
+    try {
+      const response = await apiFetch('/wallet/history');
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  // Admin Portal Dashboard
+  ipcMain.handle('get-admin-dashboard', async () => {
+    try {
+      const response = await apiFetch('/admin/dashboard');
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('admin-get-users', async (_e, { query, page }) => {
+    try {
+      const response = await apiFetch(`/admin/users?query=${encodeURIComponent(query || '')}&page=${page || 1}`);
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('admin-reset-device', async (_e, userId) => {
+    try {
+      const response = await apiFetch('/admin/users/reset-device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
+      });
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('admin-block-user', async (_e, { userId, block }) => {
+    try {
+      const response = await apiFetch('/admin/users/block', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, block })
+      });
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('admin-manual-credit', async (_e, { userId, amountPaise, reason }) => {
+    try {
+      const response = await apiFetch('/admin/users/manual-credit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, amountPaise, reason })
+      });
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('admin-refund-payment', async (_e, paymentId) => {
+    try {
+      const response = await apiFetch('/admin/users/refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentId })
+      });
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  // AI Pipeline Execution
+  ipcMain.handle('transcribe-audio', async (_e, base64Audio, mimeType) => {
+    try {
+      const response = await apiFetch('/ai/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64Audio, mimeType })
+      });
+
+      return await response.json();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('generate-answer', async (e, question) => {
+    const webContents = e.sender;
+    try {
+      const response = await apiFetch('/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        return { success: false, error: errorData.error || 'AI request failed' };
+      }
+
+      // Stream SSE response chunks from backend to Electron renderer
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullAnswerText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const cleanLine = line.trim();
+          if (cleanLine.startsWith('data: ')) {
+            try {
+              const parsed = JSON.parse(cleanLine.slice(6));
+              if (parsed.chunk) {
+                fullAnswerText += parsed.chunk;
+                webContents.send('answer-chunk', parsed.chunk);
+              } else if (parsed.done) {
+                // Completed successfully
+              } else if (parsed.error) {
+                return { success: false, error: parsed.error };
+              }
+            } catch (err) {}
+          }
+        }
+      }
+
+      return { success: true, answer: fullAnswerText };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  // File system & window controls
   ipcMain.handle('open-file-dialog', async () => {
     const result = await dialog.showOpenDialog(setupWindow, {
       properties: ['openFile'],
@@ -325,236 +739,6 @@ function registerIPC() {
     } catch (e) {
       return { success: false, error: e.message };
     }
-  });
-
-  // ─── Helper: Stream OpenAI-compatible response ─────────────────
-  async function streamOpenAIResponse(response, webContents) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let fullText = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      for (const line of lines) {
-        const cleaned = line.trim();
-        if (cleaned.startsWith('data: ')) {
-          const dataStr = cleaned.slice(6);
-          if (dataStr === '[DONE]') break;
-          try {
-            const data = JSON.parse(dataStr);
-            const chunk = data.choices?.[0]?.delta?.content;
-            if (chunk) {
-              fullText += chunk;
-              webContents.send('answer-chunk', chunk);
-            }
-          } catch (err) { /* skip malformed chunks */ }
-        }
-      }
-    }
-    return fullText;
-  }
-
-  ipcMain.handle('generate-answer', async (e, question) => {
-    const webContents = e.sender;
-    const prompt = buildPrompt(question);
-    const errors = [];
-
-    // ══════ 1. GROQ (fastest — sub-second streaming) ══════
-    const groqKey = process.env.GROQ_API_KEY;
-    if (groqKey && !groqKey.startsWith('your_')) {
-      try {
-        console.log('⚡ Trying Groq (fastest)...');
-        const response = await fetchWithRetry('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${groqKey}` },
-          body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [{ role: 'user', content: prompt }],
-            stream: true,
-            temperature: 0.6,
-            max_tokens: 300
-          })
-        });
-        if (!response.ok) throw new Error(`Groq HTTP ${response.status}`);
-        const fullText = await streamOpenAIResponse(response, webContents);
-        if (fullText) {
-          console.log('✓ Answer via Groq (fast path)');
-          return { success: true, answer: fullText };
-        }
-        throw new Error('Groq empty response');
-      } catch (e) {
-        console.warn(`✗ Groq failed: ${e.message}`);
-        errors.push(`Groq: ${e.message}`);
-      }
-    }
-
-    // ══════ 2. OmniRoute ══════
-    const omniRouteKey = process.env.OMNI_ROUTE_API_KEY;
-    if (omniRouteKey && !omniRouteKey.startsWith('your_')) {
-      const modelName = process.env.OMNI_ROUTE_MODEL || 'mimo-v2.5-free';
-      const baseUrl = process.env.OMNI_ROUTE_BASE_URL || 'http://localhost:20128/v1';
-      try {
-        console.log(`Trying OmniRoute ${modelName}...`);
-        const response = await fetchWithRetry(`${baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${omniRouteKey}` },
-          body: JSON.stringify({ model: modelName, messages: [{ role: 'user', content: prompt }], stream: true })
-        });
-        if (!response.ok) throw new Error(`OmniRoute HTTP ${response.status}`);
-        const fullText = await streamOpenAIResponse(response, webContents);
-        if (fullText) {
-          console.log(`✓ Answer via OmniRoute (${modelName})`);
-          return { success: true, answer: fullText };
-        }
-        throw new Error('OmniRoute empty response');
-      } catch (e) {
-        console.warn(`✗ OmniRoute failed: ${e.message}`);
-        errors.push(`OmniRoute: ${e.message}`);
-      }
-    }
-
-    // ══════ 3. Gemini fallback ══════
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    if (API_KEYS.length === 0) {
-      return { success: false, error: 'No API keys configured. Add GROQ_API_KEY or GEMINI_API_KEY_1 to .env file.' };
-    }
-
-    const MODELS = ['gemini-2.0-flash-lite', 'gemini-2.0-flash'];
-    for (let i = 0; i < API_KEYS.length; i++) {
-      const apiKey = getNextKey();
-      const keyNum = ((currentKeyIndex - 1 + API_KEYS.length) % API_KEYS.length) + 1;
-      for (const modelName of MODELS) {
-        try {
-          console.log(`Trying Gemini ${modelName} (Key #${keyNum})...`);
-          const genAI = new GoogleGenerativeAI(apiKey);
-          const model = genAI.getGenerativeModel({ model: modelName });
-          const result = await model.generateContentStream(prompt);
-          let fullText = '';
-          for await (const chunk of result.stream) {
-            const chunkText = chunk.text();
-            fullText += chunkText;
-            webContents.send('answer-chunk', chunkText);
-          }
-          console.log(`✓ Answer via Gemini (Key #${keyNum}, ${modelName})`);
-          return { success: true, answer: fullText };
-        } catch (e) {
-          const msg = e.message || '';
-          console.warn(`✗ Gemini Key #${keyNum}/${modelName}: ${msg.substring(0, 60)}`);
-          if (msg.includes('400') || msg.includes('API_KEY_INVALID')) break;
-          errors.push(`Gemini #${keyNum}/${modelName}: ${msg}`);
-        }
-      }
-    }
-
-    return { success: false, error: errors.join('\n') || 'All providers failed.' };
-  });
-
-  ipcMain.handle('transcribe-audio', async (_e, base64Audio, mimeType) => {
-    const errors = [];
-
-    // Helper: build audio form data
-    function buildFormData(model) {
-      const buffer = Buffer.from(base64Audio, 'base64');
-      const fd = new FormData();
-      let ext = 'webm';
-      if (mimeType && mimeType.includes('wav')) ext = 'wav';
-      else if (mimeType && mimeType.includes('mp3')) ext = 'mp3';
-      else if (mimeType && mimeType.includes('m4a')) ext = 'm4a';
-      const blob = new Blob([buffer], { type: mimeType || 'audio/webm' });
-      fd.append('file', blob, `audio.${ext}`);
-      fd.append('model', model);
-      return fd;
-    }
-
-    // Helper: process transcription result
-    function processResult(providerName, text) {
-      const cleaned = cleanTranscriptionText(text);
-      if (!cleaned) {
-        console.log(`✓ ${providerName}: "${text.substring(0, 50)}..." → silence/hallucination suppressed`);
-        return { success: false, error: 'No speech detected', noSpeech: true };
-      }
-      console.log(`✓ ${providerName}: "${cleaned.substring(0, 60)}..."`);
-      return { success: true, text: cleaned };
-    }
-
-    // ══════ 1. GROQ Whisper (fastest — sub-second) ══════
-    const groqKey = process.env.GROQ_API_KEY;
-    if (groqKey && !groqKey.startsWith('your_')) {
-      try {
-        console.log('⚡ Transcribing via Groq Whisper (fastest)...');
-        const response = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${groqKey}` },
-          body: buildFormData('whisper-large-v3')
-        });
-        if (response.ok) {
-          const data = await response.json();
-          const text = data.text?.trim();
-          if (text) return processResult('Groq', text);
-        } else {
-          console.warn(`✗ Groq Whisper HTTP ${response.status}`);
-          errors.push(`Groq: HTTP ${response.status}`);
-        }
-      } catch (e) {
-        console.warn(`✗ Groq Whisper failed: ${e.message}`);
-        errors.push(`Groq: ${e.message}`);
-      }
-    }
-
-    // ══════ 2. OmniRoute Whisper ══════
-    const omniRouteKey = process.env.OMNI_ROUTE_API_KEY;
-    if (omniRouteKey && !omniRouteKey.startsWith('your_')) {
-      const baseUrl = process.env.OMNI_ROUTE_BASE_URL || 'http://localhost:20128/v1';
-      try {
-        console.log('Transcribing via OmniRoute Whisper...');
-        const response = await fetchWithRetry(`${baseUrl}/audio/transcriptions`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${omniRouteKey}` },
-          body: buildFormData('whisper-1')
-        });
-        if (response.ok) {
-          const data = await response.json();
-          const text = data.text?.trim();
-          if (text) return processResult('OmniRoute', text);
-        } else {
-          console.warn(`✗ OmniRoute Whisper HTTP ${response.status}`);
-          errors.push(`OmniRoute: HTTP ${response.status}`);
-        }
-      } catch (e) {
-        console.warn(`✗ OmniRoute Whisper failed: ${e.message}`);
-        errors.push(`OmniRoute: ${e.message}`);
-      }
-    }
-
-    // ══════ 3. Gemini fallback ══════
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    if (API_KEYS.length === 0) {
-      return { success: false, error: 'No API keys found. Add GROQ_API_KEY or GEMINI_API_KEY_1 to .env.' };
-    }
-
-    for (let i = 0; i < API_KEYS.length; i++) {
-      const apiKey = getNextKey();
-      const keyNum = ((currentKeyIndex - 1 + API_KEYS.length) % API_KEYS.length) + 1;
-      try {
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-        const result = await model.generateContent([
-          { text: 'Transcribe the following audio exactly as spoken. Return ONLY the transcription text, nothing else.' },
-          { inlineData: { mimeType: mimeType || 'audio/webm', data: base64Audio } },
-        ]);
-        const text = result.response.text().trim();
-        return processResult(`Gemini #${keyNum}`, text);
-      } catch (e) {
-        console.warn(`✗ Gemini Transcription Key #${keyNum}: ${(e.message || '').substring(0, 60)}`);
-        errors.push(`Gemini #${keyNum}: ${e.message}`);
-      }
-    }
-
-    return { success: false, error: errors.join('; ') || 'All transcription providers failed.' };
   });
 
   ipcMain.handle('start-practice', async () => {
@@ -583,15 +767,11 @@ function registerIPC() {
 
 // ─── App Lifecycle ───────────────────────────────────────────────
 app.whenReady().then(() => {
-  // Allow all media permissions automatically
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(true));
   session.defaultSession.setPermissionCheckHandler(() => true);
 
-  // Auto-handle display media requests — capture system audio (loopback)
-  // This lets the renderer call getDisplayMedia() without a picker dialog
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
-      // Auto-select primary screen + system audio loopback
       callback({ video: sources[0], audio: 'loopback' });
     }).catch((err) => {
       console.error('Desktop capturer error:', err);
@@ -599,7 +779,7 @@ app.whenReady().then(() => {
     });
   });
 
-  loadProfileData();
+  loadSession();
   registerIPC();
   createSetupWindow();
   createTray();
@@ -609,8 +789,6 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => globalShortcut.unregisterAll());
 
-// Keep running in tray even when all windows close
 app.on('window-all-closed', () => {
-  // On Windows, don't quit when all windows are closed — keep in tray
-  // App will only quit via Tray > Quit
+  // Remain in tray
 });

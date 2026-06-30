@@ -6,6 +6,8 @@
   <title>Interview Practice Assistant</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="setup.css" />
+  <!-- Razorpay Checkout SDK -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </head>
 <body>
   <!-- ── Custom Title Bar ── -->
@@ -27,90 +29,274 @@
 
   <!-- ── Main Content ── -->
   <main class="main-scroll">
-    <div class="container">
-      <!-- Hero -->
+    <!-- ── Authentication / Welcome Screen ── -->
+    <div class="container auth-container" id="authView">
       <section class="hero">
-        <h1>Setup Your <span class="gradient-text">Interview Profile</span></h1>
-        <p class="hero-sub">Fill in your details below. The AI will use this to generate personalized, interview-ready answers during practice.</p>
+        <h1>Welcome to <span class="gradient-text">Interview Assistant</span></h1>
+        <p class="hero-sub">Get real-time, privacy-focused AI mock answers tailored to your resume.</p>
       </section>
 
-      <!-- Form -->
-      <form id="setupForm" autocomplete="off">
-        <!-- Resume -->
-        <div class="card full">
-          <div class="card-header">
-            <span class="card-icon">📄</span>
-            <h2>Resume</h2>
+      <div class="card auth-card">
+        <h2 style="text-align: center; margin-bottom: 24px; font-weight: 700; font-size: 18px;">Sign In to Continue</h2>
+        
+        <button type="button" id="googleAuthBtn" class="btn btn-google btn-full">
+          <svg class="google-icon" viewBox="0 0 24 24" width="18" height="18">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22c-.62-.57-1.04-1.33-1.04-2.63z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+          </svg>
+          Continue with Google
+        </button>
+
+        <div class="divider-or"><span>OR</span></div>
+
+        <button type="button" id="demoBtn" class="btn btn-ghost btn-full">
+          <span>✨</span> Try Demo Mode (No Account)
+        </button>
+        <p class="demo-caption">Allows unlimited questions at a slower response speed with slow AI models.</p>
+      </div>
+
+      <div class="sys-fingerprint">
+        System Signature: <span id="systemFingerprint">Detecting...</span>
+      </div>
+    </div>
+
+    <!-- ── Dashboard View ── -->
+    <div class="container" id="dashboardView" style="display: none;">
+      <!-- Dashboard Info Header -->
+      <header class="db-header">
+        <div class="user-status-card">
+          <div class="us-main">
+            <span class="user-email" id="dbEmail">loading...</span>
+            <span class="badge" id="dbTier">FREE</span>
           </div>
-          <div class="upload-zone" id="uploadZone">
-            <div class="upload-visual">
-              <div class="upload-ring"></div>
-              <span class="upload-emoji">📤</span>
+          <div class="us-stats">
+            <div class="stat-item">
+              <span class="stat-label">Free Trial Queries Left</span>
+              <span class="stat-value" id="dbFreeMinutes">--</span>
             </div>
-            <p class="upload-label">Click or drag & drop your <strong>PDF resume</strong></p>
-            <span class="upload-status" id="uploadStatus">No file selected</span>
-          </div>
-          <div class="divider-or"><span>OR</span></div>
-          <textarea id="resumeText" class="field-textarea" placeholder="Paste your resume content here..." rows="4"></textarea>
-        </div>
-
-        <!-- Company + Role row -->
-        <div class="row-2">
-          <div class="card">
-            <div class="card-header"><span class="card-icon">🏢</span><h2>Company</h2></div>
-            <input id="companyName" class="field-input" type="text" placeholder="e.g. Google, Microsoft" />
-          </div>
-          <div class="card">
-            <div class="card-header"><span class="card-icon">💼</span><h2>Role / Position</h2></div>
-            <input id="roleName" class="field-input" type="text" placeholder="e.g. Software Engineer" />
+            <div class="stat-item">
+              <span class="stat-label">Wallet Balance</span>
+              <span class="stat-value" id="dbBalance">--</span>
+            </div>
           </div>
         </div>
-
-        <!-- Job Description -->
-        <div class="card full">
-          <div class="card-header"><span class="card-icon">📋</span><h2>Job Description</h2></div>
-          <textarea id="jobDescription" class="field-textarea" placeholder="Paste the full job description here..." rows="5"></textarea>
-        </div>
-
-        <!-- Projects / Skills -->
-        <div class="card full">
-          <div class="card-header"><span class="card-icon">🚀</span><h2>Projects / Skills / Achievements</h2></div>
-          <textarea id="projects" class="field-textarea" placeholder="List key projects, technical skills, certifications, achievements..." rows="4"></textarea>
-        </div>
-
-        <!-- Extra Notes -->
-        <div class="card full">
-          <div class="card-header"><span class="card-icon">📝</span><h2>Extra Notes</h2></div>
-          <textarea id="extraNotes" class="field-textarea" placeholder="Anything else the AI should know — hobbies, leadership style, career goals..." rows="3"></textarea>
-        </div>
-
-        <!-- Actions -->
-        <div class="actions">
-          <button type="button" id="saveBtn" class="btn btn-ghost">
-            <span>💾</span> Save Profile
-          </button>
-          <button type="button" id="startBtn" class="btn btn-primary">
-            <span>🎙️</span> Start Practice
+        <div class="db-actions">
+          <button type="button" id="logoutBtn" class="btn btn-danger-light">
+            <span>🚪</span> Log Out
           </button>
         </div>
-      </form>
+      </header>
 
-      <!-- Instructions -->
-      <section class="how-to">
-        <h3>How It Works</h3>
-        <div class="steps">
-          <div class="step"><span class="step-n">1</span><p>Fill in your profile details above</p></div>
-          <div class="step"><span class="step-n">2</span><p>Click <strong>Start Practice</strong> — the app moves to your system tray</p></div>
-          <div class="step"><span class="step-n">3</span><p>Press <kbd>Ctrl + Shift + A</kbd> to toggle the floating overlay</p></div>
-          <div class="step"><span class="step-n">4</span><p>Click <strong>🎤 Listen</strong> — speak an interview question aloud</p></div>
-          <div class="step"><span class="step-n">5</span><p>Read the AI-generated answer on the overlay</p></div>
+      <!-- Navigation Tabs -->
+      <nav class="nav-tabs" id="dashboardTabs">
+        <button class="nav-tab-btn active" data-tab="tabProfile">👤 Profile Setup</button>
+        <button class="nav-tab-btn" data-tab="tabWallet">💳 Wallet & Recharge</button>
+        <button class="nav-tab-btn" id="navAdminBtn" data-tab="tabAdmin" style="display: none;">🛡️ Admin Portal</button>
+      </nav>
+
+      <!-- Tab 1: Profile Setup -->
+      <div class="tab-pane active" id="tabProfile">
+        <!-- Hero -->
+        <section class="hero">
+          <h1>Setup Your <span class="gradient-text">Interview Profile</span></h1>
+          <p class="hero-sub">Fill in your details below. The AI will use this to generate personalized, interview-ready answers during practice.</p>
+        </section>
+
+        <!-- Form -->
+        <form id="setupForm" autocomplete="off">
+          <!-- Resume -->
+          <div class="card full">
+            <div class="card-header">
+              <span class="card-icon">📄</span>
+              <h2>Resume</h2>
+            </div>
+            <div class="upload-zone" id="uploadZone">
+              <div class="upload-visual">
+                <div class="upload-ring"></div>
+                <span class="upload-emoji">📤</span>
+              </div>
+              <p class="upload-label">Click or drag & drop your <strong>PDF resume</strong></p>
+              <span class="upload-status" id="uploadStatus">No file selected</span>
+            </div>
+            <div class="divider-or"><span>OR</span></div>
+            <textarea id="resumeText" class="field-textarea" placeholder="Paste your resume content here..." rows="4"></textarea>
+          </div>
+
+          <!-- Company + Role row -->
+          <div class="row-2">
+            <div class="card">
+              <div class="card-header"><span class="card-icon">🏢</span><h2>Company</h2></div>
+              <input id="companyName" class="field-input" type="text" placeholder="e.g. Google, Microsoft" />
+            </div>
+            <div class="card">
+              <div class="card-header"><span class="card-icon">💼</span><h2>Role / Position</h2></div>
+              <input id="roleName" class="field-input" type="text" placeholder="e.g. Software Engineer" />
+            </div>
+          </div>
+
+          <!-- Job Description -->
+          <div class="card full">
+            <div class="card-header"><span class="card-icon">📋</span><h2>Job Description</h2></div>
+            <textarea id="jobDescription" class="field-textarea" placeholder="Paste the full job description here..." rows="5"></textarea>
+          </div>
+
+          <!-- Projects / Skills -->
+          <div class="card full">
+            <div class="card-header"><span class="card-icon">🚀</span><h2>Projects / Skills / Achievements</h2></div>
+            <textarea id="projects" class="field-textarea" placeholder="List key projects, technical skills, certifications, achievements..." rows="4"></textarea>
+          </div>
+
+          <!-- Extra Notes -->
+          <div class="card full">
+            <div class="card-header"><span class="card-icon">📝</span><h2>Extra Notes</h2></div>
+            <textarea id="extraNotes" class="field-textarea" placeholder="Anything else the AI should know — hobbies, leadership style, career goals..." rows="3"></textarea>
+          </div>
+
+          <!-- Actions -->
+          <div class="actions">
+            <button type="button" id="saveBtn" class="btn btn-ghost">
+              <span>💾</span> Save Profile
+            </button>
+            <button type="button" id="startBtn" class="btn btn-primary">
+              <span>🎙️</span> Start Practice
+            </button>
+          </div>
+        </form>
+
+        <!-- Instructions -->
+        <section class="how-to">
+          <h3>How It Works</h3>
+          <div class="steps">
+            <div class="step"><span class="step-n">1</span><p>Fill in your profile details above</p></div>
+            <div class="step"><span class="step-n">2</span><p>Click <strong>Start Practice</strong> — the app moves to your system tray</p></div>
+            <div class="step"><span class="step-n">3</span><p>Press <kbd>Ctrl + Shift + A</kbd> to toggle the floating overlay</p></div>
+            <div class="step"><span class="step-n">4</span><p>Click <strong>🎤 Listen</strong> — speak an interview question aloud</p></div>
+            <div class="step"><span class="step-n">5</span><p>Read the AI-generated answer on the overlay</p></div>
+          </div>
+        </section>
+
+        <!-- Disclaimer -->
+        <footer class="disclaimer">
+          ⚠️ This tool is for <strong>mock interview practice only</strong>. Not intended for use in real interviews.
+        </footer>
+      </div>
+
+      <!-- Tab 2: Wallet & Recharge -->
+      <div class="tab-pane" id="tabWallet">
+        <section class="hero">
+          <h1>SaaS Wallet <span class="gradient-text">& Balance Recharge</span></h1>
+          <p class="hero-sub">Add credits to access premium high-speed response models. Pay-as-you-go based on actual consumption.</p>
+        </section>
+
+        <div class="wallet-summary">
+          <!-- Live Wallet card -->
+          <div class="wallet-info-card">
+            <div>
+              <span class="wallet-balance-title">Current Balance</span>
+              <div class="wallet-balance-val" id="walletDisplayBalance">₹0.00</div>
+            </div>
+            <div class="wallet-usage-text">
+              Metered usage: <strong>₹0.50</strong> per voice transcription, <strong>₹1.00</strong> per fast premium response, and <strong>₹0.50</strong> per standard response.
+            </div>
+          </div>
+
+          <!-- Information card -->
+          <div class="card" style="margin: 0;">
+            <div class="card-header"><span class="card-icon">⚡</span><h2>Premium Tier Access</h2></div>
+            <p style="font-size: 13px; line-height: 1.6; color: var(--text-dim);">
+              By maintaining a positive balance, your account is automatically upgraded to <strong style="color: var(--accent2)">PRO</strong>. This unlocks the sub-second Groq answers and removes latency-limiting delays.
+            </p>
+          </div>
         </div>
-      </section>
 
-      <!-- Disclaimer -->
-      <footer class="disclaimer">
-        ⚠️ This tool is for <strong>mock interview practice only</strong>. Not intended for use in real interviews.
-      </footer>
+        <!-- Pricing Tiers Grid -->
+        <div class="card full">
+          <div class="card-header"><span class="card-icon">🛍️</span><h2>Choose Recharge Amount</h2></div>
+          <div class="pricing-grid" id="pricingGrid">
+            <!-- Dynamically populated via setup.js -->
+            <div style="text-align: center; color: var(--text-dim); padding: 20px; grid-column: 1 / -1;">Loading pricing options...</div>
+          </div>
+        </div>
+
+        <!-- Billing History -->
+        <div class="card full history-card">
+          <div class="card-header"><span class="card-icon">📜</span><h2>Payment & Recharge Logs</h2></div>
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Order ID</th>
+                <th>Amount</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="paymentHistoryBody">
+              <tr>
+                <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 16px;">No transactions recorded.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab 3: Admin Portal (Hidden by default) -->
+      <div class="tab-pane" id="tabAdmin">
+        <section class="hero">
+          <h1>Admin Control <span class="gradient-text">Operations Panel</span></h1>
+          <p class="hero-sub">Manage user registration devices, review system revenue performance metrics, and handle balance topups.</p>
+        </section>
+
+        <!-- Stats row -->
+        <div class="admin-stats-grid">
+          <div class="admin-stat-card">
+            <span class="admin-stat-lbl">Total SaaS Users</span>
+            <span class="admin-stat-val" id="adminStatUsers">0</span>
+          </div>
+          <div class="admin-stat-card">
+            <span class="admin-stat-lbl">Blocked Users</span>
+            <span class="admin-stat-val alert" id="adminStatBlocked">0</span>
+          </div>
+          <div class="admin-stat-card">
+            <span class="admin-stat-lbl">Gross Revenue</span>
+            <span class="admin-stat-val revenue" id="adminStatRevenue">₹0.00</span>
+          </div>
+          <div class="admin-stat-card">
+            <span class="admin-stat-lbl">Total Requests</span>
+            <span class="admin-stat-val" id="adminStatRequests">0</span>
+          </div>
+        </div>
+
+        <!-- User Search & Table -->
+        <div class="card full">
+          <div class="card-header"><span class="card-icon">🔍</span><h2>Registered Users & Machine Signatures</h2></div>
+          
+          <div class="admin-search-bar">
+            <input type="text" class="field-input admin-search-input" id="adminSearchInput" placeholder="Search by email address..." />
+            <button type="button" class="btn btn-primary" id="adminSearchBtn" style="padding: 10px 20px;">Search</button>
+          </div>
+
+          <div class="admin-users-card">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>User Email</th>
+                  <th>Tier</th>
+                  <th>Balance</th>
+                  <th>Device Fingerprint</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="adminUsersBody">
+                <tr>
+                  <td colspan="5" style="text-align: center; color: var(--text-dim); padding: 16px;">Search or load users...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   </main>
 

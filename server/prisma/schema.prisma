@@ -1,0 +1,145 @@
+// ─── Prisma Schema — Interview Practice Assistant ────────────
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Users ───────────────────────────────────────────────────
+model User {
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  name                String?
+  googleId            String?   @unique
+  avatarUrl           String?
+  tier                String    @default("trial") // demo, trial, free, pro
+  walletBalancePaise  Int       @default(0)       // ₹1 = 100 paise
+  freeTrialRequests   Int       @default(25)      // Free trial quota
+  freeTrialUsed       Int       @default(0)
+  deviceFingerprint   String?   @unique           // Bound device hash
+  isBlocked           Boolean   @default(false)
+  isAdmin             Boolean   @default(false)
+  refreshToken        String?
+  lastLoginAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  sessions    Session[]
+  payments    Payment[]
+  usageLogs   UsageLog[]
+  profileData ProfileData?
+
+  @@index([email])
+  @@index([googleId])
+  @@index([deviceFingerprint])
+}
+
+// ─── Sessions ────────────────────────────────────────────────
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  deviceFprint String
+  accessToken  String   @unique
+  refreshToken String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([accessToken])
+  @@index([userId])
+}
+
+// ─── Payments (Razorpay) ─────────────────────────────────────
+model Payment {
+  id                String    @id @default(uuid())
+  userId            String
+  razorpayOrderId   String    @unique
+  razorpayPaymentId String?   @unique
+  razorpaySignature String?
+  amountPaise       Int
+  currency          String    @default("INR")
+  status            String    @default("created") // created, paid, failed, refunded
+  method            String?                       // upi, card, wallet, netbanking
+  refundId          String?
+  createdAt         DateTime  @default(now())
+  verifiedAt        DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([razorpayOrderId])
+  @@index([status])
+}
+
+// ─── Usage Logs (Metering) ───────────────────────────────────
+model UsageLog {
+  id               String   @id @default(uuid())
+  userId           String
+  requestType      String                        // transcribe, generate
+  provider         String                        // groq, gemini, omniroute
+  model            String
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  audioDurationMs  Int      @default(0)
+  costPaise        Int      @default(0)
+  latencyMs        Int      @default(0)
+  success          Boolean  @default(true)
+  errorMessage     String?
+  question         String?
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([requestType])
+}
+
+// ─── Profile Data (Interview Setup) ─────────────────────────
+model ProfileData {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  resumeText     String?
+  companyName    String?
+  roleName       String?
+  jobDescription String?
+  projects       String?
+  extraNotes     String?
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Device Registry ─────────────────────────────────────────
+model DeviceRegistry {
+  id          String    @id @default(uuid())
+  fingerprint String    @unique
+  userId      String?
+  biosUuid    String?
+  cpuId       String?
+  diskSerial  String?
+  machineGuid String?
+  platform    String?
+  claimedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([fingerprint])
+  @@index([userId])
+}
+
+// ─── Admin Audit Log ─────────────────────────────────────────
+model AdminAuditLog {
+  id         String   @id @default(uuid())
+  adminEmail String
+  action     String
+  targetId   String?
+  details    String?
+  createdAt  DateTime @default(now())
+
+  @@index([adminEmail])
+  @@index([createdAt])
+}
