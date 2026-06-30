@@ -419,6 +419,162 @@
         display: none;
       }
     }
+
+    /* Modal styles */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(3, 0, 20, 0.85);
+      backdrop-filter: blur(10px);
+      z-index: 1000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 1.5rem;
+    }
+
+    .modal-card {
+      background: #0d0925;
+      border: 1px solid var(--border-color);
+      border-radius: 24px;
+      width: 100%;
+      max-width: 440px;
+      padding: 2.5rem 2rem;
+      position: relative;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+      animation: modalFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes modalFadeIn {
+      from { transform: scale(0.95); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 1.25rem;
+      right: 1.25rem;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.5rem;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    .modal-close:hover {
+      color: var(--text);
+    }
+
+    .modal-card h3 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #fff 0%, #a78bfa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .modal-subtitle {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+    }
+
+    .modal-plan-summary {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      font-weight: 600;
+    }
+
+    #summary-plan-price {
+      color: #c084fc;
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      text-align: left;
+      margin-bottom: 1.5rem;
+    }
+
+    .input-group label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .input-group input {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 0.85rem 1rem;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .input-group input:focus {
+      border-color: var(--primary);
+    }
+
+    .modal-btn {
+      display: block;
+      width: 100%;
+      padding: 0.9rem;
+      border-radius: 12px;
+      background: var(--primary);
+      border: none;
+      color: #fff;
+      font-weight: 700;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    .modal-btn:hover {
+      background: var(--primary-hover);
+    }
+
+    .modal-btn:active {
+      transform: scale(0.98);
+    }
+
+    .error-text {
+      color: #ef4444;
+      font-size: 0.85rem;
+      margin-top: 0.5rem;
+      font-weight: 500;
+    }
+
+    .success-icon {
+      width: 64px;
+      height: 64px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 2px solid #10b981;
+      color: #10b981;
+      border-radius: 50%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 2rem;
+      font-weight: bold;
+      margin: 0 auto 1.5rem auto;
+    }
   </style>
 </head>
 <body>
@@ -579,5 +735,162 @@
     </div>
   </footer>
 
+  <!-- Checkout Modal -->
+  <div id="checkout-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <button class="modal-close" onclick="closeCheckoutModal()">&times;</button>
+      <div id="modal-step-email">
+        <h3 class="font-outfit">Complete Your Recharge</h3>
+        <p class="modal-subtitle">Enter your registered email address. Credits will be added to your account instantly.</p>
+        <div class="modal-plan-summary">
+          <span id="summary-plan-name">Standard Pack</span>
+          <span id="summary-plan-price">₹299</span>
+        </div>
+        <div class="input-group">
+          <label for="checkout-email">Email Address</label>
+          <input type="email" id="checkout-email" placeholder="name@example.com" required>
+          <div id="checkout-error" class="error-text" style="display: none;"></div>
+        </div>
+        <button id="btn-pay-now" class="modal-btn" onclick="startWebCheckout()">Proceed to Payment</button>
+      </div>
+      <div id="modal-step-success" style="display: none;">
+        <div class="success-icon">✓</div>
+        <h3 class="font-outfit">Payment Successful!</h3>
+        <p id="success-message">Your credits have been added to your wallet. Open your desktop application to start using them.</p>
+        <button class="modal-btn" onclick="closeCheckoutModal()">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <script>
+    const API_URL = 'https://interview-updated.onrender.com';
+    let selectedAmount = 0;
+    let selectedName = '';
+
+    // Setup buy recharge click event listeners
+    document.querySelectorAll('.pricing-btn').forEach(btn => {
+      btn.addEventListener('click', function(e) {
+        // Prevent default download redirect
+        e.preventDefault();
+        
+        const card = this.closest('.pricing-card');
+        const planName = card.querySelector('.pricing-name').innerText;
+        const planPriceText = card.querySelector('.pricing-price').innerText;
+        
+        // Extract numeric price in paise
+        const numericPrice = parseInt(planPriceText.replace('₹', '').trim());
+        selectedAmount = numericPrice * 100; // Rs to paise
+        selectedName = planName;
+
+        openCheckoutModal(planName, planPriceText);
+      });
+    });
+
+    function openCheckoutModal(planName, planPrice) {
+      document.getElementById('summary-plan-name').innerText = planName + ' Package';
+      document.getElementById('summary-plan-price').innerText = planPrice;
+      document.getElementById('checkout-error').style.display = 'none';
+      document.getElementById('modal-step-email').style.display = 'block';
+      document.getElementById('modal-step-success').style.display = 'none';
+      document.getElementById('checkout-modal').style.display = 'flex';
+    }
+
+    function closeCheckoutModal() {
+      document.getElementById('checkout-modal').style.display = 'none';
+    }
+
+    async function startWebCheckout() {
+      const email = document.getElementById('checkout-email').value.trim();
+      const errEl = document.getElementById('checkout-error');
+      errEl.style.display = 'none';
+
+      if (!email) {
+        errEl.innerText = 'Please enter your email address.';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        errEl.innerText = 'Please enter a valid email address.';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      const btn = document.getElementById('btn-pay-now');
+      const originalText = btn.innerText;
+      btn.innerText = 'Processing...';
+      btn.disabled = true;
+
+      try {
+        const response = await fetch(`${API_URL}/wallet/web-order`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, amountPaise: selectedAmount })
+        });
+
+        const data = await response.json();
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to create payment order.');
+        }
+
+        const options = {
+          key: data.order.keyId,
+          amount: data.order.amount,
+          currency: data.order.currency,
+          name: 'Interview Copilot',
+          description: `Wallet Recharge: ${selectedName}`,
+          order_id: data.order.orderId,
+          prefill: {
+            email: data.order.userEmail,
+            name: data.order.userName
+          },
+          theme: { color: '#8b5cf6' },
+          handler: async function(res) {
+            btn.innerText = 'Verifying payment...';
+            try {
+              const verifyRes = await fetch(`${API_URL}/wallet/web-verify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  razorpayOrderId: res.razorpay_order_id,
+                  razorpayPaymentId: res.razorpay_payment_id,
+                  razorpaySignature: res.razorpay_signature
+                })
+              });
+              const verifyData = await verifyRes.json();
+              if (verifyData.success) {
+                document.getElementById('modal-step-email').style.display = 'none';
+                document.getElementById('modal-step-success').style.display = 'block';
+              } else {
+                throw new Error(verifyData.error || 'Verification failed.');
+              }
+            } catch (err) {
+              errEl.innerText = err.message || 'Payment verification failed.';
+              errEl.style.display = 'block';
+              btn.innerText = originalText;
+              btn.disabled = false;
+            }
+          },
+          modal: {
+            ondismiss: function() {
+              btn.innerText = originalText;
+              btn.disabled = false;
+            }
+          }
+        };
+
+        const rzp = new Razorpay(options);
+        rzp.open();
+
+      } catch (err) {
+        errEl.innerText = err.message || 'An error occurred during checkout.';
+        errEl.style.display = 'block';
+        btn.innerText = originalText;
+        btn.disabled = false;
+      }
+    }
+  </script>
 </body>
 </html>
