@@ -18,7 +18,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
 
-const BACKEND_URL = 'http://localhost:4000';
+const BACKEND_URL = 'https://interview-updated.onrender.com';
 const sessionPath = path.join(app.getPath('userData'), 'session-auth.json');
 
 // ─── State ───────────────────────────────────────────────────────
