@@ -1032,12 +1032,28 @@
     // Check URL parameters for OAuth Callback redirect
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
+    const refreshTokenParam = urlParams.get('refreshToken');
     const name = urlParams.get('name');
     const email = urlParams.get('email');
     const avatarUrl = urlParams.get('avatarUrl');
+    const errorParam = urlParams.get('error');
+
+    // Handle error redirects from backend
+    if (errorParam) {
+      // Show a toast notification for the error
+      const toast = document.createElement('div');
+      toast.style.cssText = 'position:fixed;top:24px;left:50%;transform:translateX(-50%);background:#ff4444;color:#fff;padding:16px 28px;border-radius:12px;font-size:0.95rem;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,0.3);animation:fadeIn 0.3s ease;max-width:90vw;text-align:center;';
+      toast.textContent = errorParam;
+      document.body.appendChild(toast);
+      setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.5s'; }, 4000);
+      setTimeout(() => toast.remove(), 4500);
+      // Clean query parameters from URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
 
     if (token) {
       localStorage.setItem('token', token);
+      if (refreshTokenParam) localStorage.setItem('refreshToken', refreshTokenParam);
       localStorage.setItem('name', name || '');
       localStorage.setItem('email', email || '');
       localStorage.setItem('avatarUrl', avatarUrl || '');

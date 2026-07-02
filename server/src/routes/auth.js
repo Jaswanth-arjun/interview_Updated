@@ -24,18 +24,26 @@ router.get('/google/callback', async (req, res, next) => {
   try {
     const { code, state } = req.query;
     if (!code) {
+      if (state === 'web') {
+        return res.redirect(`https://interview-updated.vercel.app/?error=${encodeURIComponent('Authentication code is missing')}`);
+      }
       return res.status(400).send('Authentication code is missing');
     }
 
     if (state === 'web') {
       const result = await authService.handleGoogleCallback(code, 'web-client');
-      const redirectUrl = `https://interview-updated.vercel.app/?token=${encodeURIComponent(result.accessToken)}&name=${encodeURIComponent(result.user.name)}&email=${encodeURIComponent(result.user.email)}&avatarUrl=${encodeURIComponent(result.user.avatarUrl)}`;
+      const redirectUrl = `https://interview-updated.vercel.app/?token=${encodeURIComponent(result.accessToken)}&refreshToken=${encodeURIComponent(result.refreshToken)}&name=${encodeURIComponent(result.user.name)}&email=${encodeURIComponent(result.user.email)}&avatarUrl=${encodeURIComponent(result.user.avatarUrl)}`;
       return res.redirect(redirectUrl);
     }
 
     // Perform direct HTTP redirect to Electron loopback port to prevent CSP inline script blocks
     res.redirect(`http://localhost:52981/oauth-callback?code=${encodeURIComponent(code)}`);
   } catch (err) {
+    // For web OAuth flow, redirect back to landing page with error instead of showing raw JSON
+    if (req.query.state === 'web') {
+      const errorMsg = err.isOperational ? err.message : 'Login failed. Please try again.';
+      return res.redirect(`https://interview-updated.vercel.app/?error=${encodeURIComponent(errorMsg)}`);
+    }
     next(err);
   }
 });
