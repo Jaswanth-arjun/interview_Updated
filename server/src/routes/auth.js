@@ -109,4 +109,31 @@ router.get('/profile', requireAuth, (req, res) => {
   res.json({ success: true, user: req.user });
 });
 
+// Temporary diagnostic endpoint for deployed server errors
+const fs = require('fs');
+const path = require('path');
+router.get('/logs-debug', (req, res) => {
+  try {
+    const logPath = path.join(__dirname, '..', '..', 'logs', 'error.log');
+    if (!fs.existsSync(logPath)) {
+      return res.json({ success: true, message: 'No error log file found.' });
+    }
+    const content = fs.readFileSync(logPath, 'utf8');
+    const lines = content.trim().split('\n');
+    const lastLines = lines.slice(-20);
+    res.json({
+      success: true,
+      errors: lastLines.map(line => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return line;
+        }
+      })
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
