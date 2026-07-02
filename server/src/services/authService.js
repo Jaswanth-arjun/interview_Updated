@@ -16,7 +16,7 @@ const googleClient = new OAuth2Client(
 /**
  * Generate the Google OAuth authorization URL for desktop PKCE flow.
  */
-function getGoogleAuthUrl() {
+function getGoogleAuthUrl(state = 'desktop') {
   return googleClient.generateAuthUrl({
     access_type: 'offline',
     prompt: 'select_account consent',
@@ -24,6 +24,7 @@ function getGoogleAuthUrl() {
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile',
     ],
+    state: state
   });
 }
 
@@ -58,6 +59,8 @@ async function handleGoogleCallback(code, deviceFingerprint) {
 
   const isUserAdmin = config.adminEmails.includes(email);
 
+  const isWeb = deviceFingerprint === 'web-client';
+
   if (user) {
     // ── Existing user ──
     if (user.isBlocked) {
@@ -66,28 +69,32 @@ async function handleGoogleCallback(code, deviceFingerprint) {
 
     const isAdmin = user.isAdmin || isUserAdmin;
 
-    // Check device binding (only enforced for non-admin accounts)
-    if (!isAdmin && user.deviceFingerprint && user.deviceFingerprint !== deviceFingerprint) {
+    // Check device binding (only enforced for non-admin accounts and non-web users)
+    if (!isWeb && !isAdmin && user.deviceFingerprint && user.deviceFingerprint !== deviceFingerprint) {
       throw new DeviceBindingError(
         'This account is already linked to another device. Contact support to reset.'
       );
     }
 
     // Update user info (deviceFingerprint is set to null for admins to prevent unique constraint conflicts)
+    const updateData = {
+      googleId: googleId,
+      name: name || user.name,
+      avatarUrl: picture || user.avatarUrl,
+      lastLoginAt: new Date(),
+      isAdmin: isAdmin,
+    };
+    if (!isWeb) {
+      updateData.deviceFingerprint = isAdmin ? null : deviceFingerprint;
+    }
+
     user = await prisma.user.update({
       where: { id: user.id },
-      data: {
-        googleId: googleId,
-        name: name || user.name,
-        avatarUrl: picture || user.avatarUrl,
-        deviceFingerprint: isAdmin ? null : deviceFingerprint,
-        lastLoginAt: new Date(),
-        isAdmin: isAdmin,
-      },
+      data: updateData,
     });
 
-    // Register device only for non-admin users
-    if (!isAdmin && deviceFingerprint) {
+    // Register device only for non-admin and non-web users
+    if (!isWeb && !isAdmin && deviceFingerprint) {
       await prisma.deviceRegistry.upsert({
         where: { fingerprint: deviceFingerprint },
         create: {
@@ -104,8 +111,8 @@ async function handleGoogleCallback(code, deviceFingerprint) {
   } else {
     // ── New user ──
 
-    // Check if device is already claimed by another account (only enforced for non-admin accounts)
-    if (!isUserAdmin) {
+    // Check if device is already claimed by another account (only enforced for non-admin and non-web users)
+    if (!isWeb && !isUserAdmin) {
       const existingDevice = await prisma.deviceRegistry.findUnique({
         where: { fingerprint: deviceFingerprint },
       });
@@ -117,7 +124,7 @@ async function handleGoogleCallback(code, deviceFingerprint) {
       }
     }
 
-    // Create new user (deviceFingerprint is set to null for admins to prevent unique constraint conflicts)
+    // Create new user (deviceFingerprint is set to null for admins and web-client logins)
     user = await prisma.user.create({
       data: {
         email,
@@ -128,14 +135,14 @@ async function handleGoogleCallback(code, deviceFingerprint) {
         freeTrialRequests: 0,
         freeTrialUsed: 0,
         walletBalancePaise: 1000, // Welcome balance of ₹10.00
-        deviceFingerprint: isUserAdmin ? null : deviceFingerprint,
+        deviceFingerprint: (isUserAdmin || isWeb) ? null : deviceFingerprint,
         isAdmin: isUserAdmin,
         lastLoginAt: new Date(),
       },
     });
 
-    // Register device only for non-admin users
-    if (!isUserAdmin && deviceFingerprint) {
+    // Register device only for non-admin and non-web users
+    if (!isWeb && !isUserAdmin && deviceFingerprint) {
       await prisma.deviceRegistry.upsert({
         where: { fingerprint: deviceFingerprint },
         create: {

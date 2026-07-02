@@ -11,21 +11,33 @@ const router = express.Router();
  * Returns the Google login URL for the desktop OAuth flow.
  */
 router.get('/google/url', (req, res) => {
-  const url = authService.getGoogleAuthUrl();
+  const { state } = req.query; // 'web' or 'desktop'
+  const url = authService.getGoogleAuthUrl(state || 'desktop');
   res.json({ success: true, url });
 });
 
 /**
  * GET /auth/google/callback
- * Browser landing page redirecting to Electron local loopback server.
+ * Browser landing page callback. Redirects to Electron local loopback server OR Vercel web landing.
  */
-router.get('/google/callback', (req, res) => {
-  const { code } = req.query;
-  if (!code) {
-    return res.status(400).send('Authentication code is missing');
+router.get('/google/callback', async (req, res, next) => {
+  try {
+    const { code, state } = req.query;
+    if (!code) {
+      return res.status(400).send('Authentication code is missing');
+    }
+
+    if (state === 'web') {
+      const result = await authService.handleGoogleCallback(code, 'web-client');
+      const redirectUrl = `https://interview-updated.vercel.app/?token=${encodeURIComponent(result.accessToken)}&name=${encodeURIComponent(result.user.name)}&email=${encodeURIComponent(result.user.email)}&avatarUrl=${encodeURIComponent(result.user.avatarUrl)}`;
+      return res.redirect(redirectUrl);
+    }
+
+    // Perform direct HTTP redirect to Electron loopback port to prevent CSP inline script blocks
+    res.redirect(`http://localhost:52981/oauth-callback?code=${encodeURIComponent(code)}`);
+  } catch (err) {
+    next(err);
   }
-  // Perform direct HTTP redirect to Electron loopback port to prevent CSP inline script blocks
-  res.redirect(`http://localhost:52981/oauth-callback?code=${encodeURIComponent(code)}`);
 });
 
 /**
