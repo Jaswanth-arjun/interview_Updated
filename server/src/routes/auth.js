@@ -144,4 +144,19 @@ router.get('/logs-debug', (req, res) => {
   }
 });
 
+const { PrismaClient } = require('@prisma/client');
+router.get('/db-test', async (req, res) => {
+  const testPrisma = new PrismaClient();
+  try {
+    const start = Date.now();
+    await testPrisma.$queryRaw`SELECT 1`;
+    const duration = Date.now() - start;
+    res.json({ success: true, message: `Connected to database in ${duration}ms` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message, stack: err.stack });
+  } finally {
+    await testPrisma.$disconnect();
+  }
+});
+
 module.exports = router;
