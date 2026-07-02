@@ -1,6 +1,7 @@
 // ─── Auth Service ────────────────────────────────────────────
 const { OAuth2Client } = require('google-auth-library');
 const { PrismaClient } = require('@prisma/client');
+const crypto = require('crypto');
 const config = require('../config');
 const { generateTokenPair } = require('../middleware/auth');
 const { AuthError, DeviceBindingError, ForbiddenError } = require('../utils/errors');
@@ -76,7 +77,7 @@ async function handleGoogleCallback(code, deviceFingerprint) {
       );
     }
 
-    // Update user info (deviceFingerprint is set to null for admins to prevent unique constraint conflicts)
+    // Update user info
     const updateData = {
       googleId: googleId,
       name: name || user.name,
@@ -84,8 +85,17 @@ async function handleGoogleCallback(code, deviceFingerprint) {
       lastLoginAt: new Date(),
       isAdmin: isAdmin,
     };
-    if (!isWeb) {
-      updateData.deviceFingerprint = isAdmin ? null : deviceFingerprint;
+    
+    if (isAdmin) {
+      if (!user.deviceFingerprint || !user.deviceFingerprint.startsWith('admin-')) {
+        updateData.deviceFingerprint = `admin-${crypto.randomUUID()}`;
+      }
+    } else if (isWeb) {
+      if (!user.deviceFingerprint) {
+        updateData.deviceFingerprint = `web-${crypto.randomUUID()}`;
+      }
+    } else {
+      updateData.deviceFingerprint = deviceFingerprint;
     }
 
     user = await prisma.user.update({
@@ -124,7 +134,7 @@ async function handleGoogleCallback(code, deviceFingerprint) {
       }
     }
 
-    // Create new user (deviceFingerprint is set to null for admins and web-client logins)
+    // Create new user (deviceFingerprint is set to a unique ID for admins and web-client logins to prevent unique constraint conflicts)
     user = await prisma.user.create({
       data: {
         email,
@@ -135,7 +145,11 @@ async function handleGoogleCallback(code, deviceFingerprint) {
         freeTrialRequests: 0,
         freeTrialUsed: 0,
         walletBalancePaise: 1000, // Welcome balance of ₹10.00
-        deviceFingerprint: (isUserAdmin || isWeb) ? null : deviceFingerprint,
+        deviceFingerprint: isUserAdmin
+          ? `admin-${crypto.randomUUID()}`
+          : isWeb
+            ? `web-${crypto.randomUUID()}`
+            : (deviceFingerprint || `user-${crypto.randomUUID()}`),
         isAdmin: isUserAdmin,
         lastLoginAt: new Date(),
       },

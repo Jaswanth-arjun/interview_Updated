@@ -687,20 +687,22 @@
       <a href="#pricing">Pricing</a>
       <a href="./contact.html">Contact Us</a>
     </div>
-    <a href="https://github.com/Jaswanth-arjun/interview_Updated/releases" class="btn-download" id="headerDownloadBtn">Download App</a>
+    <div style="display: flex; align-items: center; gap: 1.25rem;">
+      <a href="https://github.com/Jaswanth-arjun/interview_Updated/releases" class="btn-download" id="headerDownloadBtn">Download App</a>
 
-    <!-- User Profile Dropdown -->
-    <div class="user-profile-menu" id="userProfileMenu" style="display: none;">
-      <img class="user-avatar" id="userAvatarImg" src="" alt="Profile">
-      <div class="profile-dropdown" id="profileDropdown">
-        <div class="dropdown-header">
-          <div class="dropdown-name" id="dropdownName">John Doe</div>
-          <div class="dropdown-email" id="dropdownEmail">john@example.com</div>
+      <!-- User Profile Dropdown -->
+      <div class="user-profile-menu" id="userProfileMenu" style="display: none;">
+        <img class="user-avatar" id="userAvatarImg" src="" alt="Profile">
+        <div class="profile-dropdown" id="profileDropdown">
+          <div class="dropdown-header">
+            <div class="dropdown-name" id="dropdownName">John Doe</div>
+            <div class="dropdown-email" id="dropdownEmail">john@example.com</div>
+          </div>
+          <div class="dropdown-divider"></div>
+          <a href="#" class="dropdown-item" id="logoutBtnLink">
+            <span class="dropdown-icon">🚪</span> Sign Out
+          </a>
         </div>
-        <div class="dropdown-divider"></div>
-        <a href="#" class="dropdown-item" id="logoutBtnLink">
-          <span class="dropdown-icon">🚪</span> Sign Out
-        </a>
       </div>
     </div>
   </nav>
@@ -1049,13 +1051,19 @@
     const headerDownloadBtn = document.getElementById('headerDownloadBtn');
     const userProfileMenu = document.getElementById('userProfileMenu');
 
+    const DOWNLOAD_URL = 'https://github.com/Jaswanth-arjun/interview_Updated/releases/download/v1.0.0/Interview%20Copilot%20Setup%201.0.0.exe';
+    const RELEASES_URL = 'https://github.com/Jaswanth-arjun/interview_Updated/releases';
+    const downloadBtns = document.querySelectorAll('.btn-download');
+
     if (savedToken) {
+      // Update href of all download buttons to direct download link
+      downloadBtns.forEach(btn => {
+        btn.href = DOWNLOAD_URL;
+      });
+
       const savedName = localStorage.getItem('name');
       const savedEmail = localStorage.getItem('email');
       const savedAvatarUrl = localStorage.getItem('avatarUrl');
-
-      // Hide default download button in header
-      if (headerDownloadBtn) headerDownloadBtn.style.display = 'none';
 
       // Setup profile menu
       const avatarImg = document.getElementById('userAvatarImg');
@@ -1074,7 +1082,13 @@
       }
 
       if (userProfileMenu) userProfileMenu.style.display = 'flex';
+      if (headerDownloadBtn) headerDownloadBtn.style.display = 'inline-block';
     } else {
+      // Reset href of all download buttons to standard releases page
+      downloadBtns.forEach(btn => {
+        btn.href = RELEASES_URL;
+      });
+
       if (headerDownloadBtn) headerDownloadBtn.style.display = 'inline-block';
       if (userProfileMenu) userProfileMenu.style.display = 'none';
     }
