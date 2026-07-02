@@ -1,7 +1,7 @@
 // ─── Auth Service ────────────────────────────────────────────
 const { OAuth2Client } = require('google-auth-library');
 const { PrismaClient } = require('@prisma/client');
-const crypto = require('crypto');
+const { v4: uuidv4 } = require('uuid');
 const config = require('../config');
 const { generateTokenPair } = require('../middleware/auth');
 const { AuthError, DeviceBindingError, ForbiddenError } = require('../utils/errors');
@@ -88,11 +88,11 @@ async function handleGoogleCallback(code, deviceFingerprint) {
     
     if (isAdmin) {
       if (!user.deviceFingerprint || !user.deviceFingerprint.startsWith('admin-')) {
-        updateData.deviceFingerprint = `admin-${crypto.randomUUID()}`;
+        updateData.deviceFingerprint = `admin-${uuidv4()}`;
       }
     } else if (isWeb) {
       if (!user.deviceFingerprint) {
-        updateData.deviceFingerprint = `web-${crypto.randomUUID()}`;
+        updateData.deviceFingerprint = `web-${uuidv4()}`;
       }
     } else {
       updateData.deviceFingerprint = deviceFingerprint;
@@ -146,10 +146,10 @@ async function handleGoogleCallback(code, deviceFingerprint) {
         freeTrialUsed: 0,
         walletBalancePaise: 1000, // Welcome balance of ₹10.00
         deviceFingerprint: isUserAdmin
-          ? `admin-${crypto.randomUUID()}`
+          ? `admin-${uuidv4()}`
           : isWeb
-            ? `web-${crypto.randomUUID()}`
-            : (deviceFingerprint || `user-${crypto.randomUUID()}`),
+            ? `web-${uuidv4()}`
+            : (deviceFingerprint || `user-${uuidv4()}`),
         isAdmin: isUserAdmin,
         lastLoginAt: new Date(),
       },
