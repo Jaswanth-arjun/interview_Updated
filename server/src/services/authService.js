@@ -19,7 +19,7 @@ const googleClient = new OAuth2Client(
 function getGoogleAuthUrl() {
   return googleClient.generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent',
+    prompt: 'select_account consent',
     scope: [
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile',
@@ -56,76 +56,101 @@ async function handleGoogleCallback(code, deviceFingerprint) {
     user = await prisma.user.findUnique({ where: { email } });
   }
 
+  const isUserAdmin = config.adminEmails.includes(email);
+
   if (user) {
     // ── Existing user ──
     if (user.isBlocked) {
       throw new ForbiddenError('Your account has been suspended. Contact support.');
     }
 
-    // Check device binding
-    if (user.deviceFingerprint && user.deviceFingerprint !== deviceFingerprint) {
+    const isAdmin = user.isAdmin || isUserAdmin;
+
+    // Check device binding (only enforced for non-admin accounts)
+    if (!isAdmin && user.deviceFingerprint && user.deviceFingerprint !== deviceFingerprint) {
       throw new DeviceBindingError(
         'This account is already linked to another device. Contact support to reset.'
       );
     }
 
-    // Update user info
+    // Update user info (deviceFingerprint is set to null for admins to prevent unique constraint conflicts)
     user = await prisma.user.update({
       where: { id: user.id },
       data: {
         googleId: googleId,
         name: name || user.name,
         avatarUrl: picture || user.avatarUrl,
-        deviceFingerprint: deviceFingerprint,
+        deviceFingerprint: isAdmin ? null : deviceFingerprint,
         lastLoginAt: new Date(),
+        isAdmin: isAdmin,
       },
     });
+
+    // Register device only for non-admin users
+    if (!isAdmin && deviceFingerprint) {
+      await prisma.deviceRegistry.upsert({
+        where: { fingerprint: deviceFingerprint },
+        create: {
+          fingerprint: deviceFingerprint,
+          userId: user.id,
+          claimedAt: new Date(),
+        },
+        update: {
+          userId: user.id,
+          claimedAt: new Date(),
+        },
+      });
+    }
   } else {
     // ── New user ──
 
-    // Check if device is already claimed by another account
-    const existingDevice = await prisma.deviceRegistry.findUnique({
-      where: { fingerprint: deviceFingerprint },
-    });
+    // Check if device is already claimed by another account (only enforced for non-admin accounts)
+    if (!isUserAdmin) {
+      const existingDevice = await prisma.deviceRegistry.findUnique({
+        where: { fingerprint: deviceFingerprint },
+      });
 
-    if (existingDevice && existingDevice.userId) {
-      throw new DeviceBindingError(
-        'This device is already registered with another account. Only one account per device is allowed.'
-      );
+      if (existingDevice && existingDevice.userId) {
+        throw new DeviceBindingError(
+          'This device is already registered with another account. Only one account per device is allowed.'
+        );
+      }
     }
 
-    // Create new user with free trial
+    // Create new user (deviceFingerprint is set to null for admins to prevent unique constraint conflicts)
     user = await prisma.user.create({
       data: {
         email,
         name,
         googleId,
         avatarUrl: picture,
-        tier: 'trial',
-        freeTrialRequests: 25,
+        tier: 'free',
+        freeTrialRequests: 0,
         freeTrialUsed: 0,
-        walletBalancePaise: 0,
-        deviceFingerprint: deviceFingerprint,
-        isAdmin: config.adminEmails.includes(email),
+        walletBalancePaise: 1000, // Welcome balance of ₹10.00
+        deviceFingerprint: isUserAdmin ? null : deviceFingerprint,
+        isAdmin: isUserAdmin,
         lastLoginAt: new Date(),
       },
     });
 
-    // Register device
-    await prisma.deviceRegistry.upsert({
-      where: { fingerprint: deviceFingerprint },
-      create: {
-        fingerprint: deviceFingerprint,
-        userId: user.id,
-        claimedAt: new Date(),
-      },
-      update: {
-        userId: user.id,
-        claimedAt: new Date(),
-      },
-    });
+    // Register device only for non-admin users
+    if (!isUserAdmin && deviceFingerprint) {
+      await prisma.deviceRegistry.upsert({
+        where: { fingerprint: deviceFingerprint },
+        create: {
+          fingerprint: deviceFingerprint,
+          userId: user.id,
+          claimedAt: new Date(),
+        },
+        update: {
+          userId: user.id,
+          claimedAt: new Date(),
+        },
+      });
+    }
 
-    logger.info(`New user registered: ${email} (trial: 25 requests)`);
+    logger.info(`New user registered: ${email} (welcome balance: ₹10.00)`);
   }
 
   // 4. Generate JWT tokens
@@ -149,6 +174,7 @@ async function handleGoogleCallback(code, deviceFingerprint) {
     data: { refreshToken },
   });
 
+  const isAdminResult = user.isAdmin || isUserAdmin;
   return {
     accessToken,
     refreshToken,
@@ -157,11 +183,11 @@ async function handleGoogleCallback(code, deviceFingerprint) {
       email: user.email,
       name: user.name,
       avatarUrl: user.avatarUrl,
-      tier: user.tier,
-      walletBalancePaise: user.walletBalancePaise,
+      tier: isAdminResult ? 'pro' : user.tier,
+      walletBalancePaise: isAdminResult ? 99999999 : user.walletBalancePaise,
       freeTrialRequests: user.freeTrialRequests,
       freeTrialUsed: user.freeTrialUsed,
-      isAdmin: user.isAdmin,
+      isAdmin: isAdminResult,
     },
   };
 }

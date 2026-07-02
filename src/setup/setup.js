@@ -9,6 +9,8 @@ const jobDesc     = $('#jobDescription');
 const projects    = $('#projects');
 const extraNotes  = $('#extraNotes');
 const toast       = $('#toast');
+const btnToggleUpload = $('#btnToggleUpload');
+const btnTogglePaste = $('#btnTogglePaste');
 
 // Auth View DOM Elements
 const authView = $('#authView');
@@ -176,11 +178,32 @@ logoutBtn.addEventListener('click', async () => {
     if (data.resumeText) {
       uploadStatus.textContent = 'Resume loaded from saved profile';
       uploadStatus.classList.add('success');
+      // Automatically toggle to Paste tab to display the saved text
+      btnTogglePaste.classList.add('active');
+      btnToggleUpload.classList.remove('active');
+      uploadZone.style.display = 'none';
+      resumeText.style.display = 'block';
     }
   } catch (e) {
     console.warn('Could not load saved profile data', e);
   }
 })();
+
+// Resume input tab toggle
+
+btnToggleUpload.addEventListener('click', () => {
+  btnToggleUpload.classList.add('active');
+  btnTogglePaste.classList.remove('active');
+  uploadZone.style.display = 'flex';
+  resumeText.style.display = 'none';
+});
+
+btnTogglePaste.addEventListener('click', () => {
+  btnTogglePaste.classList.add('active');
+  btnToggleUpload.classList.remove('active');
+  uploadZone.style.display = 'none';
+  resumeText.style.display = 'block';
+});
 
 // PDF drag and drop
 uploadZone.addEventListener('click', async () => {
@@ -272,18 +295,20 @@ async function loadRechargeOptions() {
     const res = await window.api.getRechargeTiers();
     if (res.success && res.tiers) {
       pricingGrid.innerHTML = res.tiers.map(tier => `
-        <div class="pricing-card ${tier.popular ? 'popular' : ''}">
+        <div class="pricing-card ${tier.label === 'Pro' ? 'popular' : ''}">
           <div>
-            <div class="tier-name">${tier.name}</div>
-            <div class="tier-price">₹${tier.amount}</div>
-            ${tier.bonus > 0 ? `<div class="tier-bonus">+₹${tier.bonus} Bonus Credit</div>` : ''}
-            <ul class="tier-features">
+            <div class="tier-name">${tier.label}</div>
+            <div class="tier-price">₹${tier.amountRupees}</div>
+            <div class="tier-bonus" style="color: var(--muted); font-size: 0.85rem; margin-top: 4px; font-weight: normal;">
+              ${tier.description}
+            </div>
+            <ul class="tier-features" style="margin-top: 15px;">
               <li>Sub-second Fast Answers</li>
               <li>High accuracy transcription</li>
               <li>Anti-fingerprint verification</li>
             </ul>
           </div>
-          <button type="button" class="btn btn-primary btn-full buy-tier-btn" data-amount="${tier.amount * 100}">
+          <button type="button" class="btn btn-primary btn-full buy-tier-btn" data-amount="${tier.amountPaise}">
             Recharge
           </button>
         </div>
@@ -313,7 +338,7 @@ async function handlePaymentRecharge(amountPaise) {
       return;
     }
 
-    const { keyId, orderId, amount, userEmail, userName } = orderRes;
+    const { keyId, orderId, amount, userEmail, userName } = orderRes.order;
 
     const options = {
       key: keyId,

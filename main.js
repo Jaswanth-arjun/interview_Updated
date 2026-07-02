@@ -18,7 +18,9 @@ const http = require('http');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
 
-const BACKEND_URL = 'https://interview-updated.onrender.com';
+const BACKEND_URL = app.isPackaged
+  ? 'https://interview-updated.onrender.com'
+  : 'http://localhost:4000';
 const sessionPath = path.join(app.getPath('userData'), 'session-auth.json');
 
 // ─── State ───────────────────────────────────────────────────────
@@ -339,7 +341,7 @@ function startOauthListener(resolve) {
             <html>
               <body style="font-family: sans-serif; text-align: center; padding-top: 50px; background: #08081a; color: #fff;">
                 <h2 style="color: #4ade80;">Login Successful!</h2>
-                <p>Authenticating desktop assistant, please wait...</p>
+                <p>You can now close this browser tab and return to the application.</p>
               </body>
             </html>
           `);
@@ -446,7 +448,6 @@ function registerIPC() {
 
   ipcMain.handle('login-with-google', async () => {
     return new Promise(async (resolve) => {
-      let authWindow = null;
       let resolved = false;
 
       const safeResolve = (val) => {
@@ -454,11 +455,7 @@ function registerIPC() {
           resolved = true;
           resolve(val);
           
-          // Delay closing the login window and loopback server slightly to show success response page
           setTimeout(() => {
-            if (authWindow && !authWindow.isDestroyed()) {
-              authWindow.close();
-            }
             if (oauthServer) {
               try { oauthServer.close(); } catch {}
               oauthServer = null;
@@ -472,33 +469,8 @@ function registerIPC() {
         const response = await fetch(`${BACKEND_URL}/auth/google/url`);
         const data = await response.json();
         if (data.success && data.url) {
-          // Open a modal popup window on top of Setup window
-          authWindow = new BrowserWindow({
-            width: 580,
-            height: 680,
-            parent: setupWindow || undefined,
-            modal: true,
-            frame: true,
-            show: false,
-            webPreferences: {
-              nodeIntegration: false,
-              contextIsolation: true,
-            }
-          });
-
-          // Set User-Agent headers to standard Chrome desktop agent to satisfy Google OAuth requirements
-          authWindow.webContents.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
-
-          authWindow.loadURL(data.url);
-          authWindow.once('ready-to-show', () => {
-            if (authWindow && !authWindow.isDestroyed()) {
-              authWindow.show();
-            }
-          });
-
-          authWindow.on('closed', () => {
-            safeResolve({ success: false, error: 'Login window was closed by user' });
-          });
+          // Open the system browser to handle Google OAuth securely
+          shell.openExternal(data.url);
         } else {
           safeResolve({ success: false, error: 'Failed to retrieve auth URL' });
         }

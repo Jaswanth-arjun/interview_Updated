@@ -72,7 +72,7 @@
             <span class="badge" id="dbTier">FREE</span>
           </div>
           <div class="us-stats">
-            <div class="stat-item">
+            <div class="stat-item" style="display: none;">
               <span class="stat-label">Free Trial Queries Left</span>
               <span class="stat-value" id="dbFreeMinutes">--</span>
             </div>
@@ -106,62 +106,88 @@
 
         <!-- Form -->
         <form id="setupForm" autocomplete="off">
-          <!-- Resume -->
-          <div class="card full">
-            <div class="card-header">
-              <span class="card-icon">📄</span>
-              <h2>Resume</h2>
-            </div>
-            <div class="upload-zone" id="uploadZone">
-              <div class="upload-visual">
-                <div class="upload-ring"></div>
-                <span class="upload-emoji">📤</span>
+          <div class="setup-grid">
+            <!-- Left Column -->
+            <div class="setup-col-left">
+              <!-- Resume Card -->
+              <div class="card">
+                <div class="card-header">
+                  <span class="card-icon">📄</span>
+                  <h2>Resume</h2>
+                </div>
+                <div class="resume-tabs">
+                  <button type="button" class="resume-tab-btn active" id="btnToggleUpload">Upload PDF</button>
+                  <button type="button" class="resume-tab-btn" id="btnTogglePaste">Paste Plain Text</button>
+                </div>
+                <div class="resume-tab-content">
+                  <div class="upload-zone" id="uploadZone">
+                    <div class="upload-visual">
+                      <div class="upload-ring"></div>
+                      <span class="upload-emoji">📤</span>
+                    </div>
+                    <p class="upload-label">Click or drag & drop your <strong>PDF resume</strong></p>
+                    <span class="upload-status" id="uploadStatus">No file selected</span>
+                  </div>
+                  <textarea id="resumeText" class="field-textarea" placeholder="Paste your resume content here..." rows="6" style="display: none;"></textarea>
+                </div>
               </div>
-              <p class="upload-label">Click or drag & drop your <strong>PDF resume</strong></p>
-              <span class="upload-status" id="uploadStatus">No file selected</span>
+
+              <!-- Projects / Skills Card -->
+              <div class="card">
+                <div class="card-header">
+                  <span class="card-icon">🚀</span>
+                  <h2>Projects / Skills / Achievements</h2>
+                </div>
+                <textarea id="projects" class="field-textarea" placeholder="List key projects, technical skills, certifications, achievements..." rows="4"></textarea>
+              </div>
+
+              <!-- Extra Notes Card -->
+              <div class="card">
+                <div class="card-header">
+                  <span class="card-icon">📝</span>
+                  <h2>Extra Notes</h2>
+                </div>
+                <textarea id="extraNotes" class="field-textarea" placeholder="Anything else the AI should know — hobbies, leadership style, career goals..." rows="3"></textarea>
+              </div>
             </div>
-            <div class="divider-or"><span>OR</span></div>
-            <textarea id="resumeText" class="field-textarea" placeholder="Paste your resume content here..." rows="4"></textarea>
-          </div>
 
-          <!-- Company + Role row -->
-          <div class="row-2">
-            <div class="card">
-              <div class="card-header"><span class="card-icon">🏢</span><h2>Company</h2></div>
-              <input id="companyName" class="field-input" type="text" placeholder="e.g. Google, Microsoft" />
+            <!-- Right Column -->
+            <div class="setup-col-right">
+              <!-- Company & Role Card -->
+              <div class="card">
+                <div class="card-header">
+                  <span class="card-icon">🏢</span>
+                  <h2>Target Role</h2>
+                </div>
+                <div class="field-group" style="margin-bottom: 12px;">
+                  <label for="companyName" style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px; display: block;">Company Name</label>
+                  <input id="companyName" class="field-input" type="text" placeholder="e.g. Google, Microsoft" />
+                </div>
+                <div class="field-group">
+                  <label for="roleName" style="font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px; display: block;">Role / Position</label>
+                  <input id="roleName" class="field-input" type="text" placeholder="e.g. Software Engineer" />
+                </div>
+              </div>
+
+              <!-- Job Description Card -->
+              <div class="card">
+                <div class="card-header">
+                  <span class="card-icon">📋</span>
+                  <h2>Job Description</h2>
+                </div>
+                <textarea id="jobDescription" class="field-textarea" placeholder="Paste the full job description here..." rows="8"></textarea>
+              </div>
+
+              <!-- Actions block -->
+              <div class="actions-card card">
+                <button type="button" id="startBtn" class="btn btn-primary btn-full" style="justify-content: center;">
+                  <span>🎙️</span> Start Practice Mode
+                </button>
+                <button type="button" id="saveBtn" class="btn btn-ghost btn-full" style="justify-content: center;">
+                  <span>💾</span> Save Profile Details
+                </button>
+              </div>
             </div>
-            <div class="card">
-              <div class="card-header"><span class="card-icon">💼</span><h2>Role / Position</h2></div>
-              <input id="roleName" class="field-input" type="text" placeholder="e.g. Software Engineer" />
-            </div>
-          </div>
-
-          <!-- Job Description -->
-          <div class="card full">
-            <div class="card-header"><span class="card-icon">📋</span><h2>Job Description</h2></div>
-            <textarea id="jobDescription" class="field-textarea" placeholder="Paste the full job description here..." rows="5"></textarea>
-          </div>
-
-          <!-- Projects / Skills -->
-          <div class="card full">
-            <div class="card-header"><span class="card-icon">🚀</span><h2>Projects / Skills / Achievements</h2></div>
-            <textarea id="projects" class="field-textarea" placeholder="List key projects, technical skills, certifications, achievements..." rows="4"></textarea>
-          </div>
-
-          <!-- Extra Notes -->
-          <div class="card full">
-            <div class="card-header"><span class="card-icon">📝</span><h2>Extra Notes</h2></div>
-            <textarea id="extraNotes" class="field-textarea" placeholder="Anything else the AI should know — hobbies, leadership style, career goals..." rows="3"></textarea>
-          </div>
-
-          <!-- Actions -->
-          <div class="actions">
-            <button type="button" id="saveBtn" class="btn btn-ghost">
-              <span>💾</span> Save Profile
-            </button>
-            <button type="button" id="startBtn" class="btn btn-primary">
-              <span>🎙️</span> Start Practice
-            </button>
           </div>
         </form>
 

@@ -56,6 +56,16 @@ async function requireAuth(req, res, next) {
       throw new ForbiddenError('Your account has been suspended. Contact support.');
     }
 
+    // Admin/Developer override
+    const isUserAdmin = user.isAdmin || config.adminEmails.includes(user.email);
+    if (isUserAdmin) {
+      user.isAdmin = true;
+      user.tier = 'pro';
+      user.walletBalancePaise = 99999999; // Represents ₹999,999.99
+    } else {
+      user.tier = user.walletBalancePaise > 0 ? 'pro' : 'free';
+    }
+
     req.user = user;
     req.tokenPayload = payload;
     next();
@@ -82,6 +92,17 @@ async function optionalAuth(req, res, next) {
         where: { id: payload.userId },
       });
       req.user = user && !user.isBlocked ? user : null;
+
+      if (req.user) {
+        const isUserAdmin = req.user.isAdmin || config.adminEmails.includes(req.user.email);
+        if (isUserAdmin) {
+          req.user.isAdmin = true;
+          req.user.tier = 'pro';
+          req.user.walletBalancePaise = 99999999;
+        } else {
+          req.user.tier = req.user.walletBalancePaise > 0 ? 'pro' : 'free';
+        }
+      }
     } catch {
       req.user = null;
     }

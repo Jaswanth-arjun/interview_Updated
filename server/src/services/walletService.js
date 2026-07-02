@@ -30,11 +30,13 @@ async function checkQuota(userId, requestType) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
+      email: true,
       tier: true,
       walletBalancePaise: true,
       freeTrialRequests: true,
       freeTrialUsed: true,
       isBlocked: true,
+      isAdmin: true,
     },
   });
 
@@ -46,16 +48,11 @@ async function checkQuota(userId, requestType) {
     return { allowed: false, reason: 'Account suspended' };
   }
 
-  // Trial users
-  if (user.tier === 'trial') {
-    if (user.freeTrialUsed < user.freeTrialRequests) {
-      return { allowed: true, isTrial: true, costPaise: 0 };
-    }
-    return {
-      allowed: false,
-      reason: 'Your free trial has ended. Recharge your wallet to continue.',
-    };
+  // Admin/Developer Bypass: Unlimited free PRO-tier access
+  if (user.isAdmin || config.adminEmails.includes(user.email)) {
+    return { allowed: true, isTrial: false, costPaise: 0 };
   }
+
 
   // Paid users (free tier with balance, or pro)
   const costPaise = requestType === 'transcribe'
