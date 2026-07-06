@@ -17,6 +17,7 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
+const { excludeFromCapture } = require('./screen-protect');
 
 const BACKEND_URL = app.isPackaged
   ? 'https://interview-updated.onrender.com'
@@ -240,7 +241,11 @@ function createOverlayWindow() {
 
   overlayWindow.loadFile(path.join(__dirname, 'src/overlay/overlay.html'));
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  overlayWindow.setContentProtection(true);
+
+  // Apply native Win32 screen capture protection
+  overlayWindow.once('ready-to-show', () => {
+    excludeFromCapture(overlayWindow);
+  });
 }
 
 function toggleOverlay() {
@@ -249,6 +254,9 @@ function toggleOverlay() {
     overlayWindow.hide();
   } else {
     overlayWindow.show();
+    // Re-apply capture protection every time window is shown
+    // Some Windows configurations reset display affinity on hide/show
+    excludeFromCapture(overlayWindow);
   }
   isOverlayVisible = !isOverlayVisible;
 }
