@@ -17,7 +17,7 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
-const { excludeFromCapture } = require('./screen-protect');
+const { excludeFromCapture, removeProtection } = require('./screen-protect');
 
 const BACKEND_URL = app.isPackaged
   ? 'https://interview-updated.onrender.com'
@@ -216,6 +216,18 @@ function createSetupWindow() {
   setupWindow.on('closed', () => { setupWindow = null; });
 }
 
+/**
+ * Check if the current user is eligible for screen capture protection.
+ * Only premium (pro tier) and admin users get this feature.
+ */
+function isUserPremiumOrAdmin() {
+  if (sessionData.isDemo) return false;
+  if (!sessionData.user) return false;
+  const tier = (sessionData.user.tier || '').toLowerCase();
+  const isAdmin = sessionData.user.isAdmin === true;
+  return isAdmin || tier === 'pro';
+}
+
 function createOverlayWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
 
@@ -242,10 +254,26 @@ function createOverlayWindow() {
   overlayWindow.loadFile(path.join(__dirname, 'src/overlay/overlay.html'));
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  // Apply native Win32 screen capture protection
+  // Apply screen capture protection ONLY for premium/admin users
   overlayWindow.once('ready-to-show', () => {
-    excludeFromCapture(overlayWindow);
+    applyOverlayProtection();
   });
+}
+
+/**
+ * Apply or remove screen capture protection based on user tier.
+ * Premium (pro) & Admin → overlay hidden from screen capture
+ * Demo & Free → overlay visible in screen capture (no protection)
+ */
+function applyOverlayProtection() {
+  if (!overlayWindow) return;
+  if (isUserPremiumOrAdmin()) {
+    excludeFromCapture(overlayWindow);
+    console.log('✓ Screen capture protection ON (premium/admin user)');
+  } else {
+    removeProtection(overlayWindow);
+    console.log('⚠ Screen capture protection OFF (demo/free user)');
+  }
 }
 
 function toggleOverlay() {
@@ -254,9 +282,8 @@ function toggleOverlay() {
     overlayWindow.hide();
   } else {
     overlayWindow.show();
-    // Re-apply capture protection every time window is shown
-    // Some Windows configurations reset display affinity on hide/show
-    excludeFromCapture(overlayWindow);
+    // Re-apply capture protection based on user tier every time window is shown
+    applyOverlayProtection();
   }
   isOverlayVisible = !isOverlayVisible;
 }
