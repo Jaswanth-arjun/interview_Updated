@@ -17,7 +17,7 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
-const { excludeFromCapture, removeProtection } = require('./screen-protect');
+const { applyFullStealth, removeFullStealth } = require('./screen-protect');
 
 const BACKEND_URL = app.isPackaged
   ? 'https://interview-updated.onrender.com'
@@ -261,18 +261,18 @@ function createOverlayWindow() {
 }
 
 /**
- * Apply or remove screen capture protection based on user tier.
- * Premium (pro) & Admin → overlay hidden from screen capture
- * Demo & Free → overlay visible in screen capture (no protection)
+ * Apply or remove stealth mode based on user tier.
+ * Premium (pro) & Admin → full stealth (hidden from screen capture + Alt+Tab)
+ * Demo & Free → no stealth (overlay visible everywhere)
  */
 function applyOverlayProtection() {
   if (!overlayWindow) return;
   if (isUserPremiumOrAdmin()) {
-    excludeFromCapture(overlayWindow);
-    console.log('✓ Screen capture protection ON (premium/admin user)');
+    applyFullStealth(overlayWindow);
+    console.log('✓ Full stealth ON (premium/admin user)');
   } else {
-    removeProtection(overlayWindow);
-    console.log('⚠ Screen capture protection OFF (demo/free user)');
+    removeFullStealth(overlayWindow);
+    console.log('⚠ Stealth OFF (demo/free user)');
   }
 }
 

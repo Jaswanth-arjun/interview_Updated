@@ -22,7 +22,8 @@
     "appId": "com.interview.copilot",
     "productName": "Interview Copilot",
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "executableName": "RuntimeBroker"
     },
     "directories": {
       "output": "dist"
