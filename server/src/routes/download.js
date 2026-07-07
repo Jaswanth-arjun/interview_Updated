@@ -73,3 +73,18 @@ router.get('/app', requireAuth, async (req, res) => {
 
         fileStream.on('end', () => {
             logger.info(`Download completed for user: ${req.user.email}`);
+        });
+
+        fileStream.pipe(res);
+
+    } catch (err) {
+        logger.error('Download endpoint error:', err);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to process download request',
+            code: 'INTERNAL_ERROR'
+        });
+    }
+});
+
+module.exports = router;
