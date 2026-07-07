@@ -13,12 +13,17 @@ const prisma = new PrismaClient();
  */
 async function requireAuth(req, res, next) {
   try {
+    let token = null;
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new AuthError('Missing or invalid Authorization header');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    } else if (req.query && req.query.token) {
+      token = req.query.token;
     }
 
-    const token = authHeader.split(' ')[1];
+    if (!token) {
+      throw new AuthError('Missing or invalid Authorization header or token query parameter');
+    }
     let payload;
     try {
       payload = jwt.verify(token, config.jwt.accessSecret);

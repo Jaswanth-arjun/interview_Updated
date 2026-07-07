@@ -1312,19 +1312,19 @@
 
     // Intercept all download click events
     document.querySelectorAll('.btn-download').forEach(btn => {
-      btn.addEventListener('click', async function (e) {
+      btn.addEventListener('click', function (e) {
         e.preventDefault();
         const isLoggedIn = localStorage.getItem('token');
         if (!isLoggedIn) {
           openAuthModal();
         } else {
           // Download with authentication token
-          await initiateDownload();
+          initiateDownload();
         }
       });
     });
 
-    async function initiateDownload() {
+    function initiateDownload() {
       const token = localStorage.getItem('token');
       if (!token) {
         alert('Please sign in to download the application.');
@@ -1332,77 +1332,16 @@
         return;
       }
 
-      try {
-        // Show loading toast
-        const loadingToast = document.createElement('div');
-        loadingToast.id = 'download-loading-toast';
-        loadingToast.style.cssText = 'position:fixed;top:24px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;padding:16px 28px;border-radius:12px;font-size:0.95rem;z-index:99999;box-shadow:0 4px 20px rgba(139,92,246,0.4);animation:fadeIn 0.3s ease;max-width:90vw;text-align:center;display:flex;align-items:center;gap:10px;';
-        loadingToast.innerHTML = '⏳ <span>Preparing download...</span>';
-        document.body.appendChild(loadingToast);
+      // Show success toast
+      const successToast = document.createElement('div');
+      successToast.style.cssText = 'position:fixed;top:24px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;padding:16px 28px;border-radius:12px;font-size:0.95rem;z-index:99999;box-shadow:0 4px 20px rgba(139,92,246,0.4);animation:fadeIn 0.3s ease;max-width:90vw;text-align:center;display:flex;align-items:center;gap:10px;';
+      successToast.innerHTML = '⬇️ <span>Download started! Check your browser downloads.</span>';
+      document.body.appendChild(successToast);
+      setTimeout(() => { successToast.style.opacity = '0'; successToast.style.transition = 'opacity 0.5s'; }, 4000);
+      setTimeout(() => successToast.remove(), 4500);
 
-        // Make request with authentication header
-        const response = await fetch(DOWNLOAD_URL, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-
-        // Remove loading toast
-        const existingToast = document.getElementById('download-loading-toast');
-        if (existingToast) existingToast.remove();
-
-        if (!response.ok) {
-          let errorMsg = 'Failed to download application';
-          try {
-            const errorData = await response.json();
-            errorMsg = errorData.error || errorMsg;
-          } catch (e) { }
-
-          // Show error toast
-          const errorToast = document.createElement('div');
-          errorToast.style.cssText = 'position:fixed;top:24px;left:50%;transform:translateX(-50%);background:#ff4444;color:#fff;padding:16px 28px;border-radius:12px;font-size:0.95rem;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,0.3);animation:fadeIn 0.3s ease;max-width:90vw;text-align:center;';
-          errorToast.textContent = `Error: ${errorMsg}`;
-          document.body.appendChild(errorToast);
-          setTimeout(() => { errorToast.style.opacity = '0'; errorToast.style.transition = 'opacity 0.5s'; }, 4000);
-          setTimeout(() => errorToast.remove(), 4500);
-          return;
-        }
-
-        // Get the blob and create download link
-        const blob = await response.blob();
-        const downloadUrl = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.download = 'Interview Copilot Setup 1.0.0.exe';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(downloadUrl);
-
-        // Show success toast
-        const successToast = document.createElement('div');
-        successToast.style.cssText = 'position:fixed;top:24px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;padding:16px 28px;border-radius:12px;font-size:0.95rem;z-index:99999;box-shadow:0 4px 20px rgba(139,92,246,0.4);animation:fadeIn 0.3s ease;max-width:90vw;text-align:center;display:flex;align-items:center;gap:10px;';
-        successToast.innerHTML = '✓ <span>Download started! Check your Downloads folder.</span>';
-        document.body.appendChild(successToast);
-        setTimeout(() => { successToast.style.opacity = '0'; successToast.style.transition = 'opacity 0.5s'; }, 4000);
-        setTimeout(() => successToast.remove(), 4500);
-
-      } catch (err) {
-        console.error('Download error:', err);
-
-        // Remove loading toast if still there
-        const existingToast = document.getElementById('download-loading-toast');
-        if (existingToast) existingToast.remove();
-
-        // Show error toast
-        const errorToast = document.createElement('div');
-        errorToast.style.cssText = 'position:fixed;top:24px;left:50%;transform:translateX(-50%);background:#ff4444;color:#fff;padding:16px 28px;border-radius:12px;font-size:0.95rem;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,0.3);animation:fadeIn 0.3s ease;max-width:90vw;text-align:center;';
-        errorToast.textContent = 'Error: Failed to download application. Please try again.';
-        document.body.appendChild(errorToast);
-        setTimeout(() => { errorToast.style.opacity = '0'; errorToast.style.transition = 'opacity 0.5s'; }, 4000);
-        setTimeout(() => errorToast.remove(), 4500);
-      }
+      // Directly redirect to download endpoint with token in query params
+      window.location.href = `${DOWNLOAD_URL}?token=${token}`;
     }
 
     // Handle logout click

@@ -14,74 +14,17 @@ const router = express.Router();
  */
 router.get('/app', requireAuth, async (req, res) => {
     try {
-        // Path to the built executable in dist folder
-        const appName = 'Interview Copilot Setup 1.0.0.exe';
-
-        // Try multiple possible paths for the executable
-        const possiblePaths = [
-            path.join(__dirname, '../../../dist', appName),
-            path.join(process.cwd(), 'dist', appName),
-            path.join('/app/dist', appName) // For Docker/deployment
-        ];
-
-        let executablePath = null;
-        for (const filePath of possiblePaths) {
-            if (fs.existsSync(filePath)) {
-                executablePath = filePath;
-                break;
-            }
-        }
-
-        // Check if file exists
-        if (!executablePath) {
-            logger.error(`Executable not found in any of these paths:`, possiblePaths);
-            return res.status(404).json({
-                success: false,
-                error: 'Application file not found on server. Please contact support.',
-                code: 'FILE_NOT_FOUND'
-            });
-        }
-
-        // Get file size for logging
-        const fileStats = fs.statSync(executablePath);
-        const fileSizeInMB = (fileStats.size / (1024 * 1024)).toFixed(2);
-
-        logger.info(`Download initiated by user: ${req.user.email}, File: ${appName}, Size: ${fileSizeInMB} MB`);
-
-        // Set response headers for file download
-        res.setHeader('Content-Type', 'application/octet-stream');
-        res.setHeader('Content-Disposition', `attachment; filename="${appName}"`);
-        res.setHeader('Content-Length', fileStats.size);
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-
-        // Create read stream and pipe to response
-        const fileStream = fs.createReadStream(executablePath);
-
-        fileStream.on('error', (err) => {
-            logger.error(`Stream error during download for ${req.user.email}:`, err);
-            if (!res.headersSent) {
-                res.status(500).json({
-                    success: false,
-                    error: 'Error streaming file',
-                    code: 'STREAM_ERROR'
-                });
-            }
-        });
-
-        fileStream.on('end', () => {
-            logger.info(`Download completed for user: ${req.user.email}`);
-        });
-
-        fileStream.pipe(res);
-
+        const downloadUrl = 'https://github.com/Jaswanth-arjun/interview_Updated/releases/download/v1.0.0/Interview%20Copilot%20Setup%201.0.0.exe';
+        
+        logger.info(`Redirecting authenticated user ${req.user.email} to GitHub release download`);
+        
+        // Redirect to GitHub release URL
+        res.redirect(downloadUrl);
     } catch (err) {
-        logger.error('Download endpoint error:', err);
+        logger.error('Download endpoint redirect error:', err);
         res.status(500).json({
             success: false,
-            error: 'Failed to process download request',
+            error: 'Failed to process download redirect',
             code: 'INTERNAL_ERROR'
         });
     }
