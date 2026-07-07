@@ -1146,12 +1146,8 @@
         if (!isLoggedIn) {
           openAuthModal();
         } else {
-          // Trigger download in background without navigating away
-          const downloadFrame = document.createElement('iframe');
-          downloadFrame.style.display = 'none';
-          downloadFrame.src = DOWNLOAD_URL;
-          document.body.appendChild(downloadFrame);
-          setTimeout(() => downloadFrame.remove(), 10000);
+          // Trigger download directly (browsers won't unload the page for file attachments)
+          window.location.href = DOWNLOAD_URL;
 
           // Show download started toast
           const toast = document.createElement('div');
