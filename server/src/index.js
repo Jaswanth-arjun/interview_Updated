@@ -14,6 +14,7 @@ const walletRoutes = require('./routes/wallet');
 const profileRoutes = require('./routes/profile');
 const aiRoutes = require('./routes/ai');
 const adminRoutes = require('./routes/admin');
+const downloadRoutes = require('./routes/download');
 const razorpayService = require('./services/razorpayService');
 
 const app = express();
@@ -73,6 +74,7 @@ app.use('/wallet', walletRoutes);
 app.use('/profile', profileRoutes);
 app.use('/ai', aiRoutes);
 app.use('/admin', adminRoutes);
+app.use('/download', downloadRoutes);
 
 // ─── 404 Route handler ───────────────────────────────────────
 app.use((req, res, next) => {
