@@ -3,6 +3,7 @@ const express = require('express');
 const authService = require('../services/authService');
 const { requireAuth } = require('../middleware/auth');
 const { authLimiter } = require('../middleware/rateLimit');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -21,27 +22,30 @@ router.get('/google/url', (req, res) => {
  * Browser landing page callback. Redirects to Electron local loopback server OR Vercel web landing.
  */
 router.get('/google/callback', async (req, res, next) => {
+  const { code, state } = req.query;
+  const isWeb = state === 'web';
+
   try {
-    const { code, state } = req.query;
     if (!code) {
-      if (state === 'web') {
+      if (isWeb) {
         return res.redirect(`https://interview-updated.vercel.app/?error=${encodeURIComponent('Authentication code is missing')}`);
       }
       return res.status(400).send('Authentication code is missing');
     }
 
-    if (state === 'web') {
+    if (isWeb) {
       const result = await authService.handleGoogleCallback(code, 'web-client');
-      const redirectUrl = `https://interview-updated.vercel.app/?token=${encodeURIComponent(result.accessToken)}&refreshToken=${encodeURIComponent(result.refreshToken)}&name=${encodeURIComponent(result.user.name)}&email=${encodeURIComponent(result.user.email)}&avatarUrl=${encodeURIComponent(result.user.avatarUrl)}`;
+      const redirectUrl = `https://interview-updated.vercel.app/?token=${encodeURIComponent(result.accessToken)}&refreshToken=${encodeURIComponent(result.refreshToken)}&name=${encodeURIComponent(result.user.name)}&email=${encodeURIComponent(result.user.email)}&avatarUrl=${encodeURIComponent(result.user.avatarUrl || '')}`;
       return res.redirect(redirectUrl);
     }
 
     // Perform direct HTTP redirect to Electron loopback port to prevent CSP inline script blocks
     res.redirect(`http://localhost:52981/oauth-callback?code=${encodeURIComponent(code)}`);
   } catch (err) {
-    // For web OAuth flow, redirect back to landing page with error instead of showing raw JSON
-    if (req.query.state === 'web') {
-      const errorMsg = err.isOperational ? err.message : 'Login failed. Please try again.';
+    logger.error(`Google OAuth callback failed (state=${state}):`, err);
+    // For web OAuth flow, ALWAYS redirect back to landing page with error instead of showing raw JSON
+    if (isWeb) {
+      const errorMsg = err.isOperational ? err.message : 'Login failed. Please try again later.';
       return res.redirect(`https://interview-updated.vercel.app/?error=${encodeURIComponent(errorMsg)}`);
     }
     next(err);
