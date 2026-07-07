@@ -14,7 +14,7 @@ const router = express.Router();
  */
 router.get('/app', requireAuth, async (req, res) => {
     try {
-        const downloadUrl = 'https://github.com/Jaswanth-arjun/interview_Updated/releases/download/v1.0.0/Interview%20Copilot%20Setup%201.0.0.exe';
+        const downloadUrl = 'https://github.com/Jaswanth-arjun/interview_Updated/releases/download/v1.0.0/Interview.Copilot.Setup.1.0.0.exe';
         
         logger.info(`Redirecting authenticated user ${req.user.email} to GitHub release download`);
         
