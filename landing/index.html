@@ -942,6 +942,140 @@
     let selectedAmount = 0;
     let selectedName = '';
 
+    // ─── Token Refresh Management ───────────────────────────────
+    let tokenRefreshTimeout = null;
+
+    /**
+     * Decode JWT token to get expiration time
+     */
+    function decodeToken(token) {
+      try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map((c) => {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(jsonPayload);
+      } catch (err) {
+        console.error('Failed to decode token:', err);
+        return null;
+      }
+    }
+
+    /**
+     * Refresh access token using refresh token
+     */
+    async function refreshAccessToken() {
+      try {
+        const refreshToken = localStorage.getItem('refreshToken');
+        if (!refreshToken) {
+          console.warn('No refresh token available');
+          return false;
+        }
+
+        const response = await fetch(`${API_URL}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          console.error('Token refresh failed:', data.error);
+          // Refresh token expired, clear session and redirect to login
+          clearUserSession();
+          return false;
+        }
+
+        // Update tokens
+        if (data.accessToken) {
+          localStorage.setItem('token', data.accessToken);
+        }
+        if (data.refreshToken) {
+          localStorage.setItem('refreshToken', data.refreshToken);
+        }
+
+        // Schedule next refresh
+        scheduleTokenRefresh();
+        console.log('Token refreshed successfully');
+        return true;
+      } catch (err) {
+        console.error('Error refreshing token:', err);
+        return false;
+      }
+    }
+
+    /**
+     * Schedule token refresh before expiration
+     */
+    function scheduleTokenRefresh() {
+      if (tokenRefreshTimeout) {
+        clearTimeout(tokenRefreshTimeout);
+      }
+
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const payload = decodeToken(token);
+      if (!payload || !payload.exp) return;
+
+      // Calculate time until expiration
+      const expiresIn = (payload.exp * 1000) - Date.now();
+
+      // Refresh 2 minutes before expiration (or 1 minute if total expiry is less)
+      const refreshBefore = Math.min(2 * 60 * 1000, Math.max(1 * 60 * 1000, expiresIn / 2));
+      const refreshIn = expiresIn - refreshBefore;
+
+      if (refreshIn > 0) {
+        tokenRefreshTimeout = setTimeout(() => {
+          console.log('Auto-refreshing access token...');
+          refreshAccessToken();
+        }, refreshIn);
+      }
+    }
+
+    /**
+     * Clear user session and show login prompt
+     */
+    function clearUserSession() {
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('name');
+      localStorage.removeItem('email');
+      localStorage.removeItem('avatarUrl');
+      location.reload();
+    }
+
+    /**
+     * Wrap fetch to auto-refresh on 401
+     */
+    const originalFetch = window.fetch;
+    window.fetch = async function (...args) {
+      let response = await originalFetch.apply(this, args);
+
+      // If 401 Unauthorized, try to refresh token and retry
+      if (response.status === 401) {
+        const token = localStorage.getItem('token');
+        const refreshToken = localStorage.getItem('refreshToken');
+
+        if (token && refreshToken) {
+          console.log('Got 401, attempting token refresh...');
+          const refreshed = await refreshAccessToken();
+
+          if (refreshed) {
+            // Retry the original request with new token
+            const [url, options = {}] = args;
+            if (!options.headers) options.headers = {};
+            options.headers['Authorization'] = `Bearer ${localStorage.getItem('token')}`;
+            response = await originalFetch.apply(this, [url, options]);
+          }
+        }
+      }
+
+      return response;
+    };
+
     // Setup buy recharge click event listeners
     document.querySelectorAll('.pricing-btn').forEach(btn => {
       btn.addEventListener('click', function (e) {
@@ -1115,6 +1249,9 @@
       const savedName = localStorage.getItem('name');
       const savedEmail = localStorage.getItem('email');
       const savedAvatarUrl = localStorage.getItem('avatarUrl');
+
+      // Schedule token refresh before expiration
+      scheduleTokenRefresh();
 
       // Setup profile menu
       const avatarImg = document.getElementById('userAvatarImg');
