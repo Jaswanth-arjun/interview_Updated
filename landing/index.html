@@ -1141,10 +1141,25 @@
     // Intercept all download click events
     document.querySelectorAll('.btn-download').forEach(btn => {
       btn.addEventListener('click', function(e) {
+        e.preventDefault();
         const isLoggedIn = localStorage.getItem('token');
         if (!isLoggedIn) {
-          e.preventDefault();
           openAuthModal();
+        } else {
+          // Trigger download in background without navigating away
+          const downloadFrame = document.createElement('iframe');
+          downloadFrame.style.display = 'none';
+          downloadFrame.src = DOWNLOAD_URL;
+          document.body.appendChild(downloadFrame);
+          setTimeout(() => downloadFrame.remove(), 10000);
+
+          // Show download started toast
+          const toast = document.createElement('div');
+          toast.style.cssText = 'position:fixed;top:24px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;padding:16px 28px;border-radius:12px;font-size:0.95rem;z-index:99999;box-shadow:0 4px 20px rgba(139,92,246,0.4);animation:fadeIn 0.3s ease;max-width:90vw;text-align:center;display:flex;align-items:center;gap:10px;';
+          toast.innerHTML = '⬇️ <span>Download started! Check your browser downloads.</span>';
+          document.body.appendChild(toast);
+          setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.5s'; }, 4000);
+          setTimeout(() => toast.remove(), 4500);
         }
       });
     });
