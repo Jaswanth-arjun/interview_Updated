@@ -348,7 +348,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
             'Authorization': `Bearer ${config.ai.groqKey}`
           },
           body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
+            model: 'openai/gpt-oss-120b',
             messages: [{ role: 'user', content: prompt }],
             stream: true
           })
@@ -380,7 +380,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
           }
 
           providerUsed = 'groq';
-          modelUsed = 'llama-3.3-70b-versatile';
+          modelUsed = 'openai/gpt-oss-120b';
           costPaise = config.pricing.generateGroq;
         } else {
           errors.push(`Groq Llama HTTP ${response.status}`);
@@ -494,7 +494,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
             'Authorization': `Bearer ${config.ai.groqKey}`
           },
           body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
+            model: 'openai/gpt-oss-120b',
             messages: [{ role: 'user', content: prompt }],
             stream: true
           })
@@ -526,7 +526,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
           }
 
           providerUsed = 'groq';
-          modelUsed = 'llama-3.3-70b-versatile';
+          modelUsed = 'openai/gpt-oss-120b';
           costPaise = config.pricing.generateGroq;
         }
       } catch (e) {
