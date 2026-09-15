@@ -307,9 +307,9 @@ async function startListening(isAutoRestart = false) {
       console.log('⚠ Direct stream mode (no analyser) — fixed-length recording');
     }
 
-    const SILENCE_THRESHOLD = 2;
-    const SILENCE_DURATION = 1800;
-    const MAX_CHUNK_DURATION = 30000;
+    const SILENCE_DURATION = 1200;      // stop 1.2s after speech ends (fast submit)
+    const MAX_CHUNK_DURATION = 20000;   // hard cap per recording cycle
+    const CALIBRATION_MS = 1200;        // measure ambient noise for 1.2s at start
 
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
@@ -412,8 +412,13 @@ async function startListening(isAutoRestart = false) {
     let maxChunkTimeout = null;
 
     if (sysAnalyser || micAnalyserLocal) {
-      // Normal mode — silence detection via analysers
+      // Normal mode — silence detection via analysers with adaptive
+      // noise-floor calibration (first 1.2s measures ambient level, so
+      // noisy rooms don't stall detection and quiet speech still triggers)
       let meterTick = 0;
+      const baselineSamples = [];
+      const listenStart = Date.now();
+      let dynamicThreshold = 6;
 
       maxChunkTimeout = setTimeout(() => {
         if (isListening && hasSpeechStarted) {
@@ -438,12 +443,21 @@ async function startListening(isAutoRestart = false) {
 
         const maxCombinedVol = Math.max(avgSys, avgMic);
 
+        // Calibrate ambient noise floor (only while no speech detected yet)
+        if (!hasSpeechStarted && Date.now() - listenStart < CALIBRATION_MS) {
+          baselineSamples.push(maxCombinedVol);
+        } else if (baselineSamples.length > 0) {
+          const baseline = baselineSamples.reduce((a, b) => a + b, 0) / baselineSamples.length;
+          dynamicThreshold = Math.max(5, baseline * 2.5);
+          baselineSamples.length = 0;
+        }
+
         if (++meterTick % 6 === 0) {
           meterSys.style.width = Math.min(100, avgSys * 3) + '%';
           meterMic.style.width = Math.min(100, avgMic * 3) + '%';
         }
 
-        if (maxCombinedVol > SILENCE_THRESHOLD) {
+        if (maxCombinedVol > dynamicThreshold) {
           if (!hasSpeechStarted) {
             hasSpeechStarted = true;
             setStatus('listening', '🎤 Question detected — listening...');
