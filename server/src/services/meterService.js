@@ -1,10 +1,9 @@
-// ─── Metering & Usage Tracking Service ────────────────────────
-const { PrismaClient } = require('@prisma/client');
+﻿// â”€â”€â”€ Metering & Usage Tracking Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const config = require('../config');
 const walletService = require('./walletService');
 const logger = require('../utils/logger');
 
-const prisma = new PrismaClient();
+const prisma = require('../db/prisma');
 
 /**
  * Log AI transaction details and deduct wallet balance.

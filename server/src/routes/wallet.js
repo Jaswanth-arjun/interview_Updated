@@ -1,13 +1,12 @@
-// ─── Wallet & Payment Routing ────────────────────────────────
+﻿// â”€â”€â”€ Wallet & Payment Routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { paymentLimiter } = require('../middleware/rateLimit');
 const razorpayService = require('../services/razorpayService');
 const walletService = require('../services/walletService');
-const { PrismaClient } = require('@prisma/client');
 
 const router = express.Router();
-const prisma = new PrismaClient();
+const prisma = require('../db/prisma');
 
 /**
  * GET /wallet/balance

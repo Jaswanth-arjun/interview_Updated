@@ -1,11 +1,10 @@
-// ─── JWT Authentication Middleware ───────────────────────────
+﻿// â”€â”€â”€ JWT Authentication Middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const jwt = require('jsonwebtoken');
-const { PrismaClient } = require('@prisma/client');
 const config = require('../config');
 const { AuthError, ForbiddenError } = require('../utils/errors');
 const logger = require('../utils/logger');
 
-const prisma = new PrismaClient();
+const prisma = require('../db/prisma');
 
 /**
  * Verify JWT access token from Authorization header.
@@ -66,7 +65,7 @@ async function requireAuth(req, res, next) {
     if (isUserAdmin) {
       user.isAdmin = true;
       user.tier = 'pro';
-      user.walletBalancePaise = 99999999; // Represents ₹999,999.99
+      user.walletBalancePaise = 99999999; // Represents â‚¹999,999.99
     } else {
       user.tier = user.walletBalancePaise > 0 ? 'pro' : 'free';
     }
@@ -80,7 +79,7 @@ async function requireAuth(req, res, next) {
 }
 
 /**
- * Optional auth — attaches req.user if token is valid, otherwise continues.
+ * Optional auth â€” attaches req.user if token is valid, otherwise continues.
  */
 async function optionalAuth(req, res, next) {
   try {

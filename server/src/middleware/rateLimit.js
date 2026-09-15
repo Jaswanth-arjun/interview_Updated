@@ -17,7 +17,7 @@ const apiLimiter = rateLimit({
 // Auth endpoints rate limit (stricter)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10,
+  max: 25, // allow legitimate retries (cold starts, transient DB errors can burn attempts fast)
   standardHeaders: true,
   legacyHeaders: false,
   message: {

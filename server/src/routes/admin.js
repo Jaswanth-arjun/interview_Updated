@@ -1,14 +1,13 @@
-// ─── Administration Routing ──────────────────────────────────
+﻿// â”€â”€â”€ Administration Routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const express = require('express');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
-const { PrismaClient } = require('@prisma/client');
 const { resetDeviceBinding } = require('../services/deviceService');
 const { processRefund } = require('../services/razorpayService');
 const { ValidationError } = require('../utils/errors');
 const logger = require('../utils/logger');
 
 const router = express.Router();
-const prisma = new PrismaClient();
+const prisma = require('../db/prisma');
 
 // Enforce auth & admin requirements globally on this router
 router.use(requireAuth);
@@ -182,7 +181,7 @@ router.post('/users/manual-credit', async (req, res, next) => {
         adminEmail: req.user.email,
         action: 'manual_credit',
         targetId: userId,
-        details: `Credited ₹${(amountPaise / 100).toFixed(2)}: ${reason || 'Manual Adjustment'}`
+        details: `Credited â‚¹${(amountPaise / 100).toFixed(2)}: ${reason || 'Manual Adjustment'}`
       }
     });
 

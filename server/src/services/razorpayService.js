@@ -1,13 +1,12 @@
-// ─── Razorpay Service ────────────────────────────────────────
+﻿// â”€â”€â”€ Razorpay Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
-const { PrismaClient } = require('@prisma/client');
 const config = require('../config');
 const { ValidationError, AppError } = require('../utils/errors');
 const walletService = require('./walletService');
 const logger = require('../utils/logger');
 
-const prisma = new PrismaClient();
+const prisma = require('../db/prisma');
 
 let razorpay = null;
 try {
@@ -16,9 +15,9 @@ try {
       key_id: config.razorpay.keyId,
       key_secret: config.razorpay.keySecret,
     });
-    logger.info('✓ Razorpay initialized');
+    logger.info('âœ“ Razorpay initialized');
   } else {
-    logger.warn('⚠ Razorpay not configured — payment features disabled');
+    logger.warn('âš  Razorpay not configured â€” payment features disabled');
   }
 } catch (err) {
   logger.error('Failed to initialize Razorpay:', err);
@@ -34,7 +33,7 @@ async function createOrder(userId, amountPaise) {
 
   if (amountPaise < config.pricing.minRecharge) {
     throw new ValidationError(
-      `Minimum recharge amount is ₹${(config.pricing.minRecharge / 100).toFixed(0)}`
+      `Minimum recharge amount is â‚¹${(config.pricing.minRecharge / 100).toFixed(0)}`
     );
   }
 
@@ -63,7 +62,7 @@ async function createOrder(userId, amountPaise) {
     },
   });
 
-  logger.info(`Payment order created: ${order.id} for ₹${(amountPaise / 100).toFixed(2)} (user: ${user.email})`);
+  logger.info(`Payment order created: ${order.id} for â‚¹${(amountPaise / 100).toFixed(2)} (user: ${user.email})`);
 
   return {
     orderId: order.id,
@@ -136,7 +135,7 @@ async function verifyPayment(razorpayOrderId, razorpayPaymentId, razorpaySignatu
   // Credit wallet
   const newBalance = await walletService.addCredits(payment.userId, payment.amountPaise);
 
-  logger.info(`Payment verified: ${razorpayPaymentId} → ₹${(payment.amountPaise / 100).toFixed(2)} credited to user ${payment.userId}`);
+  logger.info(`Payment verified: ${razorpayPaymentId} â†’ â‚¹${(payment.amountPaise / 100).toFixed(2)} credited to user ${payment.userId}`);
 
   return {
     success: true,
@@ -264,11 +263,11 @@ async function processRefund(paymentId, adminEmail) {
       adminEmail,
       action: 'refund',
       targetId: payment.userId,
-      details: `Refunded ₹${(payment.amountPaise / 100).toFixed(2)} — Razorpay refund: ${refund.id}`,
+      details: `Refunded â‚¹${(payment.amountPaise / 100).toFixed(2)} â€” Razorpay refund: ${refund.id}`,
     },
   });
 
-  logger.info(`Refund processed by ${adminEmail}: ₹${(payment.amountPaise / 100).toFixed(2)} for payment ${paymentId}`);
+  logger.info(`Refund processed by ${adminEmail}: â‚¹${(payment.amountPaise / 100).toFixed(2)} for payment ${paymentId}`);
 
   return { refundId: refund.id };
 }

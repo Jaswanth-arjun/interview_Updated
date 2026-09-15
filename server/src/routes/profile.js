@@ -1,10 +1,9 @@
-// ─── Profile Setup Routing ────────────────────────────────────
+﻿// â”€â”€â”€ Profile Setup Routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
-const { PrismaClient } = require('@prisma/client');
 
 const router = express.Router();
-const prisma = new PrismaClient();
+const prisma = require('../db/prisma');
 
 /**
  * GET /profile/setup

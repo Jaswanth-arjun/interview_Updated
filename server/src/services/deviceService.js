@@ -1,9 +1,8 @@
-// ─── Device Fingerprint & Binding Service ───────────────────
-const { PrismaClient } = require('@prisma/client');
+﻿// â”€â”€â”€ Device Fingerprint & Binding Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const { DeviceBindingError, ValidationError } = require('../utils/errors');
 const logger = require('../utils/logger');
 
-const prisma = new PrismaClient();
+const prisma = require('../db/prisma');
 
 /**
  * Validates device binding. 

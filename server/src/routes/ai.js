@@ -1,15 +1,14 @@
-// ─── AI Pipeline Execution Routing ────────────────────────────
+﻿// â”€â”€â”€ AI Pipeline Execution Routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const express = require('express');
 const { optionalAuth } = require('../middleware/auth');
 const { aiLimiter } = require('../middleware/rateLimit');
 const walletService = require('../services/walletService');
 const aiService = require('../services/aiService');
-const { PrismaClient } = require('@prisma/client');
 const { AuthError, InsufficientBalanceError } = require('../utils/errors');
 const logger = require('../utils/logger');
 
 const router = express.Router();
-const prisma = new PrismaClient();
+const prisma = require('../db/prisma');
 
 /**
  * Helper to resolve user context (demo session vs. registered session).
@@ -17,7 +16,7 @@ const prisma = new PrismaClient();
 async function resolveSessionContext(req) {
   const authHeader = req.headers.authorization;
   
-  // ── Demo Mode ──
+  // â”€â”€ Demo Mode â”€â”€
   if (authHeader === 'Bearer demo' || !authHeader) {
     return {
       userId: 'demo-user',
@@ -28,7 +27,7 @@ async function resolveSessionContext(req) {
     };
   }
 
-  // ── Registered User ──
+  // â”€â”€ Registered User â”€â”€
   if (!req.user) {
     throw new AuthError('Access Denied: Invalid session token');
   }

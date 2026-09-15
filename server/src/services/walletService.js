@@ -1,10 +1,9 @@
-// ─── Wallet Service ──────────────────────────────────────────
-const { PrismaClient } = require('@prisma/client');
+﻿// â”€â”€â”€ Wallet Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const { InsufficientBalanceError, ValidationError } = require('../utils/errors');
 const logger = require('../utils/logger');
 const config = require('../config');
 
-const prisma = new PrismaClient();
+const prisma = require('../db/prisma');
 
 /**
  * Get wallet balance for a user.
@@ -65,7 +64,7 @@ async function checkQuota(userId, requestType) {
 
   return {
     allowed: false,
-    reason: `Insufficient wallet balance (₹${(user.walletBalancePaise / 100).toFixed(2)} remaining). Please recharge.`,
+    reason: `Insufficient wallet balance (â‚¹${(user.walletBalancePaise / 100).toFixed(2)} remaining). Please recharge.`,
   };
 }
 
@@ -105,7 +104,7 @@ async function deductCredits(userId, costPaise, isTrial = false) {
     },
   });
 
-  logger.debug(`Deducted ₹${(costPaise / 100).toFixed(2)} from user ${userId}`);
+  logger.debug(`Deducted â‚¹${(costPaise / 100).toFixed(2)} from user ${userId}`);
 }
 
 /**
@@ -124,7 +123,7 @@ async function addCredits(userId, amountPaise) {
     },
   });
 
-  logger.info(`Added ₹${(amountPaise / 100).toFixed(2)} to wallet of user ${userId}. New balance: ₹${(user.walletBalancePaise / 100).toFixed(2)}`);
+  logger.info(`Added â‚¹${(amountPaise / 100).toFixed(2)} to wallet of user ${userId}. New balance: â‚¹${(user.walletBalancePaise / 100).toFixed(2)}`);
 
   return user.walletBalancePaise;
 }
