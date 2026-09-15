@@ -17,6 +17,7 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
+const { applyFullStealth, removeFullStealth } = require('./screen-protect');
 const REMOTE_BACKEND_URL = 'https://interview-updated.onrender.com';
 const LOCAL_BACKEND_URL = 'http://localhost:4000';
 
@@ -850,6 +851,10 @@ function registerIPC() {
 }
 
 // ─── App Lifecycle ───────────────────────────────────────────────
+// Disable GPU acceleration — fixes intermittent Chromium
+// "video capture service crashed" errors on some Windows machines.
+app.disableHardwareAcceleration();
+
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(true));
   session.defaultSession.setPermissionCheckHandler(() => true);

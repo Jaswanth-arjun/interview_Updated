@@ -204,16 +204,31 @@ async function startListening(isAutoRestart = false) {
     isContinuousMode = true;
   }
 
+  let sysAnalyser = null;
+  let sysDataArray = null;
+  let micAnalyserLocal = null;
+  let micDataArrayLocal = null;
+  let hasSpeechStarted = false;
+
   try {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const dest = audioContext.createMediaStreamDestination();
+    // 0. AudioContext — OPTIONAL. A broken audio device must never kill
+    //    the capture flow; we fall back to direct-stream recording.
+    let dest = null;
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume().catch(() => {});
+      }
+      dest = audioContext.createMediaStreamDestination();
+    } catch (ctxErr) {
+      console.warn('AudioContext unavailable — using direct stream mode:', ctxErr);
+      audioContext = null;
+      dest = null;
+    }
 
     let sysStream = null;
-    let sysAnalyser = null;
-    let sysDataArray = null;
 
-    // 1. Try capturing system desktop audio
-    let sysAudioStreamObj = null;
+    // 1. Try capturing system desktop audio (interviewer voice)
     try {
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
         audio: true,
@@ -222,58 +237,64 @@ async function startListening(isAutoRestart = false) {
       displayStream.getVideoTracks().forEach((t) => t.stop());
       const sysAudioTracks = displayStream.getAudioTracks();
       if (sysAudioTracks.length > 0) {
-        sysAudioStreamObj = displayStream;
         sysStream = new MediaStream(sysAudioTracks);
-        const sysSource = audioContext.createMediaStreamSource(sysStream);
-        sysAnalyser = audioContext.createAnalyser();
-        sysAnalyser.fftSize = 512;
-        sysAnalyser.smoothingTimeConstant = 0.85;
-        sysSource.connect(sysAnalyser);
-        sysSource.connect(dest);
-        sysDataArray = new Uint8Array(sysAnalyser.frequencyBinCount);
+        if (audioContext && dest) {
+          const sysSource = audioContext.createMediaStreamSource(sysStream);
+          sysAnalyser = audioContext.createAnalyser();
+          sysAnalyser.fftSize = 512;
+          sysAnalyser.smoothingTimeConstant = 0.85;
+          sysSource.connect(sysAnalyser);
+          sysSource.connect(dest);
+          sysDataArray = new Uint8Array(sysAnalyser.frequencyBinCount);
+        }
         console.log('✓ System audio loopback captured');
       }
     } catch (sysErr) {
       console.warn('System audio loopback not available:', sysErr);
     }
 
-    // 2. Capture microphone audio
-    let micAnalyserLocal = null;
-    let micDataArrayLocal = null;
+    // 2. Capture microphone audio (picks up interviewer via laptop speakers)
     try {
       if (!micStream || !micStream.active) {
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       }
       if (micStream && micStream.getAudioTracks().length > 0) {
-        const micSource = audioContext.createMediaStreamSource(micStream);
-        micAnalyserLocal = audioContext.createAnalyser();
-        micAnalyserLocal.fftSize = 512;
-        micAnalyserLocal.smoothingTimeConstant = 0.85;
-        micSource.connect(micAnalyserLocal);
-        micSource.connect(dest);
-        micDataArrayLocal = new Uint8Array(micAnalyserLocal.frequencyBinCount);
+        if (audioContext && dest) {
+          const micSource = audioContext.createMediaStreamSource(micStream);
+          micAnalyserLocal = audioContext.createAnalyser();
+          micAnalyserLocal.fftSize = 512;
+          micAnalyserLocal.smoothingTimeConstant = 0.85;
+          micSource.connect(micAnalyserLocal);
+          micSource.connect(dest);
+          micDataArrayLocal = new Uint8Array(micAnalyserLocal.frequencyBinCount);
+        }
         console.log('✓ Microphone input captured');
       }
     } catch (micErr) {
       console.warn('Microphone stream error:', micErr);
     }
 
-    const combinedTracks = dest.stream.getAudioTracks();
-    if (combinedTracks.length === 0) {
-      setStatus('error', 'No audio sources detected — please allow Microphone or System Audio');
-      isContinuousMode = false;
-      stopListeningUI();
-      return;
+    // 3. Pick the recording source
+    if (audioContext && dest && dest.stream.getAudioTracks().length > 0) {
+      audioStream = dest.stream;
+    } else {
+      // Direct mode — no AudioContext. Prefer system track, else mic.
+      const directTracks = (sysStream && sysStream.getAudioTracks().length > 0)
+        ? sysStream.getAudioTracks()
+        : (micStream ? micStream.getAudioTracks() : []);
+      if (directTracks.length === 0) {
+        setStatus('error', 'No audio sources detected — please allow Microphone access');
+        isContinuousMode = false;
+        stopListeningUI();
+        return;
+      }
+      audioStream = new MediaStream(directTracks);
+      console.log('⚠ Direct stream mode (no analyser) — fixed-length recording');
     }
-
-    audioStream = dest.stream;
 
     const SILENCE_THRESHOLD = 2;
     const SILENCE_DURATION = 1800;
     const MAX_CHUNK_DURATION = 30000;
-
-    let hasSpeechStarted = false;
-    let maxChunkTimeout = null;
 
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
@@ -373,53 +394,64 @@ async function startListening(isAutoRestart = false) {
     setStatus('listening', 'Listening for interview questions...');
     audioMeter.style.display = 'flex';
 
-    maxChunkTimeout = setTimeout(() => {
-      if (isListening && hasSpeechStarted) {
-        stopListening(false);
-      }
-    }, MAX_CHUNK_DURATION);
+    let maxChunkTimeout = null;
 
-    let meterTick = 0;
+    if (sysAnalyser || micAnalyserLocal) {
+      // Normal mode — silence detection via analysers
+      let meterTick = 0;
 
-    function checkSilence() {
-      if (!isListening) return;
-
-      let avgSys = 0;
-      if (sysAnalyser && sysDataArray) {
-        sysAnalyser.getByteFrequencyData(sysDataArray);
-        avgSys = sysDataArray.reduce((a, b) => a + b, 0) / sysDataArray.length;
-      }
-
-      let avgMic = 0;
-      if (micAnalyserLocal && micDataArrayLocal) {
-        micAnalyserLocal.getByteFrequencyData(micDataArrayLocal);
-        avgMic = micDataArrayLocal.reduce((a, b) => a + b, 0) / micDataArrayLocal.length;
-      }
-
-      const maxCombinedVol = Math.max(avgSys, avgMic);
-
-      if (++meterTick % 6 === 0) {
-        meterSys.style.width = Math.min(100, avgSys * 3) + '%';
-        meterMic.style.width = Math.min(100, avgMic * 3) + '%';
-      }
-
-      if (maxCombinedVol > SILENCE_THRESHOLD) {
-        if (!hasSpeechStarted) {
-          hasSpeechStarted = true;
-          setStatus('listening', '🎤 Question detected — listening...');
-          listenLabel.textContent = 'Recording...';
+      maxChunkTimeout = setTimeout(() => {
+        if (isListening && hasSpeechStarted) {
+          stopListening(false);
         }
-        clearTimeout(silenceTimeout);
-        silenceTimeout = null;
-      } else if (hasSpeechStarted && !silenceTimeout) {
-        silenceTimeout = setTimeout(() => {
-          if (isListening) stopListening(false);
-        }, SILENCE_DURATION);
-      }
+      }, MAX_CHUNK_DURATION);
 
-      requestAnimationFrame(checkSilence);
+      function checkSilence() {
+        if (!isListening) return;
+
+        let avgSys = 0;
+        if (sysAnalyser && sysDataArray) {
+          sysAnalyser.getByteFrequencyData(sysDataArray);
+          avgSys = sysDataArray.reduce((a, b) => a + b, 0) / sysDataArray.length;
+        }
+
+        let avgMic = 0;
+        if (micAnalyserLocal && micDataArrayLocal) {
+          micAnalyserLocal.getByteFrequencyData(micDataArrayLocal);
+          avgMic = micDataArrayLocal.reduce((a, b) => a + b, 0) / micDataArrayLocal.length;
+        }
+
+        const maxCombinedVol = Math.max(avgSys, avgMic);
+
+        if (++meterTick % 6 === 0) {
+          meterSys.style.width = Math.min(100, avgSys * 3) + '%';
+          meterMic.style.width = Math.min(100, avgMic * 3) + '%';
+        }
+
+        if (maxCombinedVol > SILENCE_THRESHOLD) {
+          if (!hasSpeechStarted) {
+            hasSpeechStarted = true;
+            setStatus('listening', '🎤 Question detected — listening...');
+            listenLabel.textContent = 'Recording...';
+          }
+          clearTimeout(silenceTimeout);
+          silenceTimeout = null;
+        } else if (hasSpeechStarted && !silenceTimeout) {
+          silenceTimeout = setTimeout(() => {
+            if (isListening) stopListening(false);
+          }, SILENCE_DURATION);
+        }
+
+        requestAnimationFrame(checkSilence);
+      }
+      checkSilence();
+    } else {
+      // Direct mode — no analysers. Record a fixed 12s chunk, transcribe it.
+      console.log('⚠ Fixed-length recording mode (12s chunks)');
+      maxChunkTimeout = setTimeout(() => {
+        if (isListening) stopListening(false);
+      }, 12000);
     }
-    checkSilence();
 
   } catch (e) {
     console.error('Audio capture setup error:', e);
