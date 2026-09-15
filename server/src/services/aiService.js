@@ -204,7 +204,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
       try {
         logger.info(`Transcribing via Gemini key index #${activeKey.index}...`);
         const genAI = new GoogleGenerativeAI(activeKey.key);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
         const result = await model.generateContent([
           { text: 'Transcribe the following audio exactly as spoken. Return ONLY the transcription text, nothing else.' },
           { inlineData: { mimeType: mimeType || 'audio/webm', data: base64Audio } }
@@ -217,7 +217,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
         await meterService.logAndMeterUsage(userId, {
           requestType: 'transcribe',
           provider: 'gemini',
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.6-flash',
           audioDurationMs,
           costPaise: config.pricing.transcribe,
           latencyMs,
@@ -453,7 +453,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
       try {
         logger.info(`Generating answer via Gemini key #${activeKey.index}...`);
         const genAI = new GoogleGenerativeAI(activeKey.key);
-        const modelName = 'gemini-2.5-flash';
+        const modelName = 'gemini-3.6-flash';
         const model = genAI.getGenerativeModel({ model: modelName });
         const resultStream = await model.generateContentStream(prompt);
 
