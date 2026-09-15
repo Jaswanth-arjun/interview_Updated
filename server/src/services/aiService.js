@@ -1,4 +1,4 @@
-// â”€â”€â”€ AI Pipeline & Model Router Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+﻿// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ AI Pipeline & Model Router Service Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const config = require('../config');
 const meterService = require('./meterService');
@@ -15,7 +15,7 @@ function getNextGeminiKey() {
   return { key, index: geminiKeyIndex };
 }
 
-// â”€â”€â”€ Resilient Fetch helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Resilient Fetch helper Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 async function fetchWithRetry(url, options = {}, { retries = 2, timeoutMs = 15000, retryDelayMs = 1000 } = {}) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
@@ -29,13 +29,13 @@ async function fetchWithRetry(url, options = {}, { retries = 2, timeoutMs = 1500
       const isLastAttempt = attempt === retries;
       const isNetworkError = err.name === 'AbortError' || err.message?.includes('fetch failed') || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT';
       if (isLastAttempt || !isNetworkError) throw err;
-      logger.warn(`âŸ³ Network error on attempt ${attempt + 1}/${retries + 1}, retrying in ${retryDelayMs}ms...`);
+      logger.warn(`Ã¢Å¸Â³ Network error on attempt ${attempt + 1}/${retries + 1}, retrying in ${retryDelayMs}ms...`);
       await new Promise(r => setTimeout(r, retryDelayMs));
     }
   }
 }
 
-// â”€â”€â”€ Transcription Cleaner (from main.js) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Transcription Cleaner (from main.js) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 function cleanTranscriptionText(text) {
   if (!text) return '';
   const lower = text.toLowerCase().trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
@@ -124,7 +124,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
   // 1. Groq Whisper first (ultra-fast transcription for all tiers)
   if (config.ai.groqKey) {
     try {
-      logger.info(`⚡ Transcribing via Groq Whisper...`);
+      logger.info(`âš¡ Transcribing via Groq Whisper...`);
       const response = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${config.ai.groqKey}` },
@@ -161,7 +161,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
   // 2. OmniRoute Whisper Fallback
   if (config.ai.omniRoute.apiKey) {
     try {
-      logger.info(`⚡ Fallback: Transcribing via OmniRoute...`);
+      logger.info(`âš¡ Fallback: Transcribing via OmniRoute...`);
       const response = await fetchWithRetry(`${config.ai.omniRoute.baseUrl}/audio/transcriptions`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${config.ai.omniRoute.apiKey}` },
@@ -242,7 +242,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
         const response = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${config.ai.groqKey}` },
-          body: buildAudioFormData(base64Audio, mimeType, 'whisper-large-v3')
+          body: buildAudioFormData(base64Audio, mimeType, 'whisper-large-v3-turbo')
         });
 
         if (response.ok) {
@@ -254,7 +254,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
           await meterService.logAndMeterUsage(userId, {
             requestType: 'transcribe',
             provider: 'groq',
-            model: 'whisper-large-v3',
+            model: 'whisper-large-v3-turbo',
             audioDurationMs,
             costPaise: config.pricing.transcribe,
             latencyMs,
@@ -292,13 +292,13 @@ function buildInterviewPrompt(question, d) {
   return `You are a real candidate sitting in a live job interview. The interviewer just asked you: "${question}"
 
 HOW TO ANSWER (very important):
-- Talk EXACTLY like a real person speaking out loud — natural, confident, relaxed. NOT like a textbook, NOT like an AI.
+- Talk EXACTLY like a real person speaking out loud â€” natural, confident, relaxed. NOT like a textbook, NOT like an AI.
 - Use SIMPLE everyday words. Explain it like you're telling a friend who is smart but new to the topic.
 - Keep it SHORT: 2-4 sentences you can say in ONE breath (~20-30 seconds of talking).
 - Flow: give the direct answer first, then one small reason or quick real-life example, then STOP. Don't drag it.
-- Sound human — natural phrases like "Basically...", "So...", "For example...", "In my experience..." are fine. But never sound scripted or memorized.
-- NEVER use bullet points, markdown, lists, headings, or emojis — spoken answer only, plain sentences.
-- NEVER say you are an AI, assistant, or language model — you ARE the candidate.
+- Sound human â€” natural phrases like "Basically...", "So...", "For example...", "In my experience..." are fine. But never sound scripted or memorized.
+- NEVER use bullet points, markdown, lists, headings, or emojis â€” spoken answer only, plain sentences.
+- NEVER say you are an AI, assistant, or language model â€” you ARE the candidate.
 - TECHNICAL questions: explain in your own simple words with a quick real-world example. Do NOT dump textbook definitions. Don't mention resume/projects unless it's about your experience.
 - RESUME/PROJECT questions: use ONLY facts from the candidate context below. Never invent details.
 
@@ -339,7 +339,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
   // 1. Groq generation first (ultra-fast answer streaming)
   if (config.ai.groqKey) {
     try {
-      logger.info(`⚡ Generating answer via Groq...`);
+      logger.info(`âš¡ Generating answer via Groq...`);
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -393,7 +393,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
   // 2. OmniRoute fallback
   if (!providerUsed && config.ai.omniRoute.apiKey) {
     try {
-      logger.info(`⚡ Fallback: Generating answer via OmniRoute...`);
+      logger.info(`âš¡ Fallback: Generating answer via OmniRoute...`);
       const response = await fetch(`${config.ai.omniRoute.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
