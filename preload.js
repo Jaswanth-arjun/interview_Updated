@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // Auth, Machine ID & Credits
   getMachineId: () => ipcRenderer.invoke('get-machine-id'),
+  getLocalSession: () => ipcRenderer.invoke('get-local-session'),
   getUserProfile: () => ipcRenderer.invoke('get-user-profile'),
   loginUser: (email, password) => ipcRenderer.invoke('login-user', { email, password }),
   registerUser: (email, password) => ipcRenderer.invoke('register-user', { email, password }),

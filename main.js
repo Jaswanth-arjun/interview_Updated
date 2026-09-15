@@ -237,8 +237,8 @@ function createOverlayWindow() {
     x: width - 510,
     y: 40,
     frame: false,
-    transparent: false,
-    backgroundColor: '#08081a',
+    transparent: true,
+    backgroundColor: '#00000000',
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: true,
@@ -340,10 +340,14 @@ function createTray() {
 
 // ─── Google OAuth 2.0 Loopback Listener ─────────────────────────
 let oauthServer = null;
+let lastHandledCode = null;
+let lastHandledResponse = null;
 function startOauthListener(resolve) {
   if (oauthServer) {
     try { oauthServer.close(); } catch {}
   }
+  lastHandledCode = null;
+  lastHandledResponse = null;
 
   oauthServer = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost:52981');
@@ -352,6 +356,16 @@ function startOauthListener(resolve) {
       if (!code) {
         res.end('Authentication code missing');
         resolve({ success: false, error: 'Authentication code missing' });
+        return;
+      }
+
+      // Refresh-safe: Google auth codes are single-use. If this exact
+      // callback was already handled (e.g. user refreshes the tab),
+      // replay the cached result instead of re-posting the dead code
+      // (a re-post would fail AND burn a rate-limiter attempt).
+      if (lastHandledCode === code && lastHandledResponse) {
+        res.writeHead(lastHandledResponse.status, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+        res.end(lastHandledResponse.body);
         return;
       }
 
@@ -372,24 +386,32 @@ function startOauthListener(resolve) {
         const data = await response.json();
         if (data.success) {
           saveSession(data);
-          res.end(`
+          const body = `
             <html>
               <body style="font-family: sans-serif; text-align: center; padding-top: 50px; background: #08081a; color: #fff;">
                 <h2 style="color: #4ade80;">Login Successful!</h2>
                 <p>You can now close this browser tab and return to the application.</p>
               </body>
             </html>
-          `);
+          `;
+          lastHandledCode = code;
+          lastHandledResponse = { status: 200, body };
+          res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+          res.end(body);
           resolve({ success: true, user: data.user });
         } else {
-          res.end(`
+          const body = `
             <html>
               <body style="font-family: sans-serif; text-align: center; padding-top: 50px; background: #08081a; color: #fff;">
                 <h2 style="color: #ef4444;">Login Failed</h2>
                 <p>Error: ${data.error || 'Unknown error'}</p>
               </body>
             </html>
-          `);
+          `;
+          lastHandledCode = code;
+          lastHandledResponse = { status: 200, body };
+          res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+          res.end(body);
           resolve({ success: false, error: data.error });
         }
       } catch (err) {
@@ -418,6 +440,17 @@ function startOauthListener(resolve) {
 function registerIPC() {
   ipcMain.handle('get-machine-id', async () => {
     return getDeviceFingerprint();
+  });
+
+  ipcMain.handle('get-local-session', async () => {
+    // Instant, network-free check so the renderer can skip the login
+    // screen flash when a session is already saved on disk.
+    return {
+      hasSession: sessionData.isDemo || !!sessionData.accessToken,
+      isDemo: !!sessionData.isDemo,
+      email: sessionData.user?.email || null,
+      name: sessionData.user?.name || null
+    };
   });
 
   ipcMain.handle('get-user-profile', async () => {
@@ -719,6 +752,16 @@ function registerIPC() {
             } catch (err) {}
           }
         }
+      }
+
+      if (buffer && buffer.trim().startsWith('data: ')) {
+        try {
+          const parsed = JSON.parse(buffer.trim().slice(6));
+          if (parsed.chunk) {
+            fullAnswerText += parsed.chunk;
+            webContents.send('answer-chunk', parsed.chunk);
+          }
+        } catch (err) {}
       }
 
       return { success: true, answer: fullAnswerText };

@@ -1,4 +1,4 @@
-﻿// â”€â”€â”€ Metering & Usage Tracking Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ Metering & Usage Tracking Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const config = require('../config');
 const walletService = require('./walletService');
 const logger = require('../utils/logger');
@@ -23,14 +23,18 @@ async function logAndMeterUsage(userId, {
   isTrial = false
 }) {
   try {
-    // 1. Deduct cost from wallet balance if not a free trial request
-    if (success && !isTrial && costPaise > 0) {
+    // 1. Deduct cost from wallet balance if not a free trial request and not demo mode
+    if (success && !isTrial && userId !== 'demo-user' && userId !== 'test-user' && costPaise > 0) {
       await walletService.deductCredits(userId, costPaise, false);
-    } else if (success && isTrial) {
+    } else if (success && isTrial && userId !== 'demo-user') {
       await walletService.deductCredits(userId, 0, true);
     }
 
-    // 2. Write record to DB
+    // 2. Write record to DB (only for registered users)
+    if (userId === 'demo-user' || userId === 'test-user') {
+      return null;
+    }
+
     const log = await prisma.usageLog.create({
       data: {
         userId,

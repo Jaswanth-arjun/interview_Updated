@@ -3,3 +3,8 @@ node_modules/
 dist/
 out/
 *.log
+landing_backup/
+service-test/
+.vscode/
+
+

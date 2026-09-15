@@ -1,4 +1,4 @@
-﻿// â”€â”€â”€ AI Pipeline & Model Router Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ AI Pipeline & Model Router Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const config = require('../config');
 const meterService = require('./meterService');
@@ -121,84 +121,81 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
   const sizeBytes = Buffer.from(base64Audio, 'base64').length;
   const audioDurationMs = Math.round((sizeBytes / 16000) * 1000);
 
-  // 1. Paid / Fast path: Groq Whisper first, fallback to OmniRoute, fallback to Gemini
-  if (!isSlow) {
-    // Groq Whisper
-    if (config.ai.groqKey) {
-      try {
-        logger.info(`âš¡ Fast path: Transcribing via Groq Whisper...`);
-        const response = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${config.ai.groqKey}` },
-          body: buildAudioFormData(base64Audio, mimeType, 'whisper-large-v3')
+  // 1. Groq Whisper first (ultra-fast transcription for all tiers)
+  if (config.ai.groqKey) {
+    try {
+      logger.info(`⚡ Transcribing via Groq Whisper...`);
+      const response = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${config.ai.groqKey}` },
+        body: buildAudioFormData(base64Audio, mimeType, 'whisper-large-v3-turbo')
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.text?.trim();
+        const cleaned = cleanTranscriptionText(text);
+        const latencyMs = Date.now() - start;
+
+        await meterService.logAndMeterUsage(userId, {
+          requestType: 'transcribe',
+          provider: 'groq',
+          model: 'whisper-large-v3-turbo',
+          audioDurationMs,
+          costPaise: config.pricing.transcribe,
+          latencyMs,
+          success: true,
+          question: cleaned,
+          isTrial
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          const text = data.text?.trim();
-          const cleaned = cleanTranscriptionText(text);
-          const latencyMs = Date.now() - start;
-
-          await meterService.logAndMeterUsage(userId, {
-            requestType: 'transcribe',
-            provider: 'groq',
-            model: 'whisper-large-v3',
-            audioDurationMs,
-            costPaise: config.pricing.transcribe,
-            latencyMs,
-            success: true,
-            question: cleaned,
-            isTrial
-          });
-
-          return { success: true, text: cleaned };
-        }
-        errors.push(`Groq Whisper HTTP ${response.status}`);
-      } catch (e) {
-        logger.warn(`Groq Whisper failed: ${e.message}`);
-        errors.push(`Groq Whisper: ${e.message}`);
+        return { success: true, text: cleaned };
       }
-    }
-
-    // OmniRoute Whisper Fallback
-    if (config.ai.omniRoute.apiKey) {
-      try {
-        logger.info(`âš¡ Fast path fallback: Transcribing via OmniRoute...`);
-        const response = await fetchWithRetry(`${config.ai.omniRoute.baseUrl}/audio/transcriptions`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${config.ai.omniRoute.apiKey}` },
-          body: buildAudioFormData(base64Audio, mimeType, 'whisper-1')
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const text = data.text?.trim();
-          const cleaned = cleanTranscriptionText(text);
-          const latencyMs = Date.now() - start;
-
-          await meterService.logAndMeterUsage(userId, {
-            requestType: 'transcribe',
-            provider: 'omniroute',
-            model: 'whisper-1',
-            audioDurationMs,
-            costPaise: config.pricing.transcribe,
-            latencyMs,
-            success: true,
-            question: cleaned,
-            isTrial
-          });
-
-          return { success: true, text: cleaned };
-        }
-        errors.push(`OmniRoute Whisper HTTP ${response.status}`);
-      } catch (e) {
-        logger.warn(`OmniRoute Whisper failed: ${e.message}`);
-        errors.push(`OmniRoute: ${e.message}`);
-      }
+      errors.push(`Groq Whisper HTTP ${response.status}`);
+    } catch (e) {
+      logger.warn(`Groq Whisper failed: ${e.message}`);
+      errors.push(`Groq Whisper: ${e.message}`);
     }
   }
 
-  // 2. Slow path / Demo path / Last fallback: Gemini transcription
+  // 2. OmniRoute Whisper Fallback
+  if (config.ai.omniRoute.apiKey) {
+    try {
+      logger.info(`⚡ Fallback: Transcribing via OmniRoute...`);
+      const response = await fetchWithRetry(`${config.ai.omniRoute.baseUrl}/audio/transcriptions`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${config.ai.omniRoute.apiKey}` },
+        body: buildAudioFormData(base64Audio, mimeType, 'whisper-1')
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.text?.trim();
+        const cleaned = cleanTranscriptionText(text);
+        const latencyMs = Date.now() - start;
+
+        await meterService.logAndMeterUsage(userId, {
+          requestType: 'transcribe',
+          provider: 'omniroute',
+          model: 'whisper-1',
+          audioDurationMs,
+          costPaise: config.pricing.transcribe,
+          latencyMs,
+          success: true,
+          question: cleaned,
+          isTrial
+        });
+
+        return { success: true, text: cleaned };
+      }
+      errors.push(`OmniRoute Whisper HTTP ${response.status}`);
+    } catch (e) {
+      logger.warn(`OmniRoute Whisper failed: ${e.message}`);
+      errors.push(`OmniRoute: ${e.message}`);
+    }
+  }
+
+  // 3. Gemini transcription fallback
   if (config.ai.geminiKeys.length > 0) {
     const keysCount = config.ai.geminiKeys.length;
     for (let i = 0; i < keysCount; i++) {
@@ -207,7 +204,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
       try {
         logger.info(`Transcribing via Gemini key index #${activeKey.index}...`);
         const genAI = new GoogleGenerativeAI(activeKey.key);
-        const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
         const result = await model.generateContent([
           { text: 'Transcribe the following audio exactly as spoken. Return ONLY the transcription text, nothing else.' },
           { inlineData: { mimeType: mimeType || 'audio/webm', data: base64Audio } }
@@ -220,7 +217,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
         await meterService.logAndMeterUsage(userId, {
           requestType: 'transcribe',
           provider: 'gemini',
-          model: 'gemini-3.6-flash',
+          model: 'gemini-2.5-flash',
           audioDurationMs,
           costPaise: config.pricing.transcribe,
           latencyMs,
@@ -339,134 +336,124 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
     res.write(`data: ${JSON.stringify({ chunk: text })}\n\n`);
   };
 
-  // 1. Paid / Fast path generation: Groq (Llama) -> OmniRoute -> Gemini
-  if (!isSlow) {
-    // Try Groq Llama 3.3
-    if (config.ai.groqKey) {
-      try {
-        logger.info(`âš¡ Fast path: Generating answer via Groq Llama 3.3...`);
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.ai.groqKey}`
-          },
-          body: JSON.stringify({
-            model: 'openai/gpt-oss-120b',
-            messages: [{ role: 'user', content: prompt }],
-            stream: true
-          })
-        });
+  // 1. Groq generation first (ultra-fast answer streaming)
+  if (config.ai.groqKey) {
+    try {
+      logger.info(`⚡ Generating answer via Groq...`);
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.ai.groqKey}`
+        },
+        body: JSON.stringify({
+          model: 'openai/gpt-oss-20b',
+          messages: [{ role: 'user', content: prompt }],
+          stream: true
+        })
+      });
 
-        if (response.ok) {
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
+      if (response.ok) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
 
-            for (const line of lines) {
-              const cleanLine = line.trim();
-              if (cleanLine.startsWith('data: ')) {
-                if (cleanLine.includes('[DONE]')) continue;
-                try {
-                  const parsed = JSON.parse(cleanLine.slice(6));
-                  const text = parsed.choices[0]?.delta?.content || '';
-                  if (text) sendChunk(text);
-                } catch {}
-              }
+          for (const line of lines) {
+            const cleanLine = line.trim();
+            if (cleanLine.startsWith('data: ')) {
+              if (cleanLine.includes('[DONE]')) continue;
+              try {
+                const parsed = JSON.parse(cleanLine.slice(6));
+                const text = parsed.choices[0]?.delta?.content || '';
+                if (text) sendChunk(text);
+              } catch {}
             }
           }
-
-          providerUsed = 'groq';
-          modelUsed = 'openai/gpt-oss-120b';
-          costPaise = config.pricing.generateGroq;
-        } else {
-          errors.push(`Groq Llama HTTP ${response.status}`);
         }
-      } catch (e) {
-        logger.warn(`Groq generation failed: ${e.message}`);
-        errors.push(`Groq: ${e.message}`);
+
+        providerUsed = 'groq';
+        modelUsed = 'openai/gpt-oss-20b';
+        costPaise = config.pricing.generateGroq;
+      } else {
+        errors.push(`Groq HTTP ${response.status}`);
       }
-    }
-
-    // Try OmniRoute fallback
-    if (!providerUsed && config.ai.omniRoute.apiKey) {
-      try {
-        logger.info(`âš¡ Fast path fallback: Generating answer via OmniRoute...`);
-        const response = await fetch(`${config.ai.omniRoute.baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.ai.omniRoute.apiKey}`
-          },
-          body: JSON.stringify({
-            model: config.ai.omniRoute.model,
-            messages: [{ role: 'user', content: prompt }],
-            stream: true
-          })
-        });
-
-        if (response.ok) {
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop();
-
-            for (const line of lines) {
-              const cleanLine = line.trim();
-              if (cleanLine.startsWith('data: ')) {
-                if (cleanLine.includes('[DONE]')) continue;
-                try {
-                  const parsed = JSON.parse(cleanLine.slice(6));
-                  const text = parsed.choices[0]?.delta?.content || '';
-                  if (text) sendChunk(text);
-                } catch {}
-              }
-            }
-          }
-
-          providerUsed = 'omniroute';
-          modelUsed = config.ai.omniRoute.model;
-          costPaise = config.pricing.generateGroq;
-        } else {
-          errors.push(`OmniRoute HTTP ${response.status}`);
-        }
-      } catch (e) {
-        logger.warn(`OmniRoute generation failed: ${e.message}`);
-        errors.push(`OmniRoute: ${e.message}`);
-      }
+    } catch (e) {
+      logger.warn(`Groq generation failed: ${e.message}`);
+      errors.push(`Groq: ${e.message}`);
     }
   }
 
-  // 2. Slow / Demo / Gemini execution
+  // 2. OmniRoute fallback
+  if (!providerUsed && config.ai.omniRoute.apiKey) {
+    try {
+      logger.info(`⚡ Fallback: Generating answer via OmniRoute...`);
+      const response = await fetch(`${config.ai.omniRoute.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.ai.omniRoute.apiKey}`
+        },
+        body: JSON.stringify({
+          model: config.ai.omniRoute.model,
+          messages: [{ role: 'user', content: prompt }],
+          stream: true
+        })
+      });
+
+      if (response.ok) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            const cleanLine = line.trim();
+            if (cleanLine.startsWith('data: ')) {
+              if (cleanLine.includes('[DONE]')) continue;
+              try {
+                const parsed = JSON.parse(cleanLine.slice(6));
+                const text = parsed.choices[0]?.delta?.content || '';
+                if (text) sendChunk(text);
+              } catch {}
+            }
+          }
+        }
+
+        providerUsed = 'omniroute';
+        modelUsed = config.ai.omniRoute.model;
+        costPaise = config.pricing.generateGroq;
+      } else {
+        errors.push(`OmniRoute HTTP ${response.status}`);
+      }
+    } catch (e) {
+      logger.warn(`OmniRoute generation failed: ${e.message}`);
+      errors.push(`OmniRoute: ${e.message}`);
+    }
+  }
+
+  // 3. Gemini execution fallback
   if (!providerUsed && config.ai.geminiKeys.length > 0) {
     const keysCount = config.ai.geminiKeys.length;
     for (let i = 0; i < keysCount; i++) {
       const activeKey = getNextGeminiKey();
       if (!activeKey) continue;
       try {
-        // Enforce 2-second artificial latency for slow-speed demo / trial tiers
-        if (isSlow) {
-          logger.info(`Applying 2-second delay for slow tier answer generation...`);
-          await new Promise(r => setTimeout(r, 2000));
-        }
-
         logger.info(`Generating answer via Gemini key #${activeKey.index}...`);
         const genAI = new GoogleGenerativeAI(activeKey.key);
-        // Use gemini-3.6-flash-lite if available, fallback to flash
-        const modelName = isSlow ? 'gemini-3.6-flash-lite' : 'gemini-3.6-flash';
+        const modelName = 'gemini-2.5-flash';
         const model = genAI.getGenerativeModel({ model: modelName });
         const resultStream = await model.generateContentStream(prompt);
 

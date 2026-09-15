@@ -165,6 +165,18 @@ logoutBtn.addEventListener('click', async () => {
 
 // ─── Profile Fields & Saving ───────────────────────────────────
 (async function init() {
+  // Instant local session check — if the user is already logged in,
+  // show the dashboard immediately instead of flashing the login page
+  // while the profile request verifies the token with the server.
+  try {
+    const local = await window.api.getLocalSession();
+    if (local && local.hasSession) {
+      authView.style.display = 'none';
+      dashboardView.style.display = 'block';
+      dbEmail.textContent = local.email || 'Loading profile...';
+    }
+  } catch {}
+
   await updateSessionStatus();
   try {
     const data = await window.api.getSetupData();
