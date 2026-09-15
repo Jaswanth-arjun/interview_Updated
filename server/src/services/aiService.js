@@ -1,4 +1,4 @@
-// ─── AI Pipeline & Model Router Service ──────────────────────
+﻿// â”€â”€â”€ AI Pipeline & Model Router Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const config = require('../config');
 const meterService = require('./meterService');
@@ -15,7 +15,7 @@ function getNextGeminiKey() {
   return { key, index: geminiKeyIndex };
 }
 
-// ─── Resilient Fetch helper ──────────────────────────────────
+// â”€â”€â”€ Resilient Fetch helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function fetchWithRetry(url, options = {}, { retries = 2, timeoutMs = 15000, retryDelayMs = 1000 } = {}) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
@@ -29,13 +29,13 @@ async function fetchWithRetry(url, options = {}, { retries = 2, timeoutMs = 1500
       const isLastAttempt = attempt === retries;
       const isNetworkError = err.name === 'AbortError' || err.message?.includes('fetch failed') || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT';
       if (isLastAttempt || !isNetworkError) throw err;
-      logger.warn(`⟳ Network error on attempt ${attempt + 1}/${retries + 1}, retrying in ${retryDelayMs}ms...`);
+      logger.warn(`âŸ³ Network error on attempt ${attempt + 1}/${retries + 1}, retrying in ${retryDelayMs}ms...`);
       await new Promise(r => setTimeout(r, retryDelayMs));
     }
   }
 }
 
-// ─── Transcription Cleaner (from main.js) ─────────────────────
+// â”€â”€â”€ Transcription Cleaner (from main.js) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function cleanTranscriptionText(text) {
   if (!text) return '';
   const lower = text.toLowerCase().trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
@@ -126,7 +126,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
     // Groq Whisper
     if (config.ai.groqKey) {
       try {
-        logger.info(`⚡ Fast path: Transcribing via Groq Whisper...`);
+        logger.info(`âš¡ Fast path: Transcribing via Groq Whisper...`);
         const response = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${config.ai.groqKey}` },
@@ -163,7 +163,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
     // OmniRoute Whisper Fallback
     if (config.ai.omniRoute.apiKey) {
       try {
-        logger.info(`⚡ Fast path fallback: Transcribing via OmniRoute...`);
+        logger.info(`âš¡ Fast path fallback: Transcribing via OmniRoute...`);
         const response = await fetchWithRetry(`${config.ai.omniRoute.baseUrl}/audio/transcriptions`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${config.ai.omniRoute.apiKey}` },
@@ -207,7 +207,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
       try {
         logger.info(`Transcribing via Gemini key index #${activeKey.index}...`);
         const genAI = new GoogleGenerativeAI(activeKey.key);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
         const result = await model.generateContent([
           { text: 'Transcribe the following audio exactly as spoken. Return ONLY the transcription text, nothing else.' },
           { inlineData: { mimeType: mimeType || 'audio/webm', data: base64Audio } }
@@ -220,7 +220,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
         await meterService.logAndMeterUsage(userId, {
           requestType: 'transcribe',
           provider: 'gemini',
-          model: 'gemini-2.0-flash',
+          model: 'gemini-3.6-flash',
           audioDurationMs,
           costPaise: config.pricing.transcribe,
           latencyMs,
@@ -301,13 +301,13 @@ RULES:
 - NO bullet points, NO markdown, NO lists, NO filler like "Sure" or "Certainly".
 - Start answering immediately as the candidate.
 
-─── CONTEXT ───
+â”€â”€â”€ CONTEXT â”€â”€â”€
 Role: ${d.roleName || 'N/A'} at ${d.companyName || 'N/A'}
 JD: ${d.jobDescription || 'N/A'}
 Resume: ${d.resumeText || 'N/A'}
 Projects: ${d.projects || 'N/A'}
 Notes: ${d.extraNotes || 'N/A'}
-───────────────
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Answer now:`;
 }
 
@@ -340,7 +340,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
     // Try Groq Llama 3.3
     if (config.ai.groqKey) {
       try {
-        logger.info(`⚡ Fast path: Generating answer via Groq Llama 3.3...`);
+        logger.info(`âš¡ Fast path: Generating answer via Groq Llama 3.3...`);
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -394,7 +394,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
     // Try OmniRoute fallback
     if (!providerUsed && config.ai.omniRoute.apiKey) {
       try {
-        logger.info(`⚡ Fast path fallback: Generating answer via OmniRoute...`);
+        logger.info(`âš¡ Fast path fallback: Generating answer via OmniRoute...`);
         const response = await fetch(`${config.ai.omniRoute.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
@@ -461,8 +461,8 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
 
         logger.info(`Generating answer via Gemini key #${activeKey.index}...`);
         const genAI = new GoogleGenerativeAI(activeKey.key);
-        // Use gemini-2.0-flash-lite if available, fallback to flash
-        const modelName = isSlow ? 'gemini-2.0-flash-lite' : 'gemini-2.0-flash';
+        // Use gemini-3.6-flash-lite if available, fallback to flash
+        const modelName = isSlow ? 'gemini-3.6-flash-lite' : 'gemini-3.6-flash';
         const model = genAI.getGenerativeModel({ model: modelName });
         const resultStream = await model.generateContentStream(prompt);
 
