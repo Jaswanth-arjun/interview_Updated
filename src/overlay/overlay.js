@@ -1,29 +1,29 @@
-﻿// â”€â”€â”€ DOM References â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// DOM References 
 const $ = (sel) => document.querySelector(sel);
 
-const statusDot   = $('#statusDot');
-const statusText  = $('#statusText');
+const statusDot = $('#statusDot');
+const statusText = $('#statusText');
 const questionBox = $('#questionBox');
-const questionPH  = $('#questionPlaceholder');
+const questionPH = $('#questionPlaceholder');
 const questionTxt = $('#questionText');
-const answerBox   = $('#answerBox');
-const answerPH    = $('#answerPlaceholder');
-const answerTxt   = $('#answerText');
-const loader      = $('#loader');
-const btnListen   = $('#btnListen');
+const answerBox = $('#answerBox');
+const answerPH = $('#answerPlaceholder');
+const answerTxt = $('#answerText');
+const loader = $('#loader');
+const btnListen = $('#btnListen');
 const listenLabel = $('#listenLabel');
-const btnType     = $('#btnType');
+const btnType = $('#btnType');
 const manualInput = $('#manualInput');
-const manualQ     = $('#manualQ');
-const btnSend     = $('#btnSend');
-const btnCopy     = $('#btnCopy');
-const btnSetup    = $('#btnSetup');
-const btnClose    = $('#btnClose');
-const audioMeter  = $('#audioMeter');
-const meterSys    = $('#meterSys');
-const meterMic    = $('#meterMic');
+const manualQ = $('#manualQ');
+const btnSend = $('#btnSend');
+const btnCopy = $('#btnCopy');
+const btnSetup = $('#btnSetup');
+const btnClose = $('#btnClose');
+const audioMeter = $('#audioMeter');
+const meterSys = $('#meterSys');
+const meterMic = $('#meterMic');
 
-// â”€â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// State 
 let isListening = false;
 let isContinuousMode = false;
 let mediaRecorder = null;
@@ -32,7 +32,7 @@ let audioStream = null;
 let audioContext = null;
 let silenceTimeout = null;
 
-// Microphone stream â€” used ONLY as a last-resort fallback when the
+// Microphone stream used ONLY as a last-resort fallback when the
 // system audio capture fails. NEVER mixed into the normal recording
 // (so the user's own voice is never transcribed as a question).
 let micStream = null;
@@ -42,23 +42,23 @@ let isStreamingAnswer = false;
 let currentCycleProcessed = false;
 
 
-// â”€â”€â”€ Status Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Status Helpers 
 function setStatus(state, text) {
   statusDot.className = 'status-dot ' + state;
   statusText.textContent = text;
 }
 
-// â”€â”€â”€ UI Visual Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// UI Visual Handlers 
 function showQuestion(text) {
-  questionPH.style.display = 'none';
-  questionTxt.style.display = 'block';
+  questionPH.style.display ='none';
+  questionTxt.style.display ='block';
   questionTxt.textContent = text;
 }
 
 function showAnswer(text) {
-  loader.style.display = 'none';
-  answerPH.style.display = 'none';
-  answerTxt.style.display = 'block';
+  loader.style.display ='none';
+  answerPH.style.display ='none';
+  answerTxt.style.display ='block';
   if (text && !isStreamingAnswer) {
     answerTxt.textContent = text;
   }
@@ -66,26 +66,26 @@ function showAnswer(text) {
 }
 
 function showLoader() {
-  answerPH.style.display = 'none';
-  answerTxt.style.display = 'none';
-  answerTxt.textContent = '';
-  loader.style.display = 'flex';
+  answerPH.style.display ='none';
+  answerTxt.style.display ='none';
+  answerTxt.textContent ='';
+  loader.style.display ='flex';
   isStreamingAnswer = false;
 }
 
 function showError(msg) {
-  loader.style.display = 'none';
-  answerPH.style.display = 'none';
-  answerTxt.style.display = 'block';
-  answerTxt.textContent = 'âš ï¸ ' + msg;
-  setStatus('error', 'Error occurred');
+  loader.style.display ='none';
+  answerPH.style.display ='none';
+  answerTxt.style.display ='block';
+  answerTxt.textContent = 'Error: ' + msg;
+  setStatus('error','Error occurred');
   isStreamingAnswer = false;
 }
 
-// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Helpers 
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
-  let binary = '';
+  let binary ='';
   const chunkSize = 8192;
   for (let i = 0; i < bytes.length; i += chunkSize) {
     const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
@@ -94,19 +94,19 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
-// â”€â”€â”€ Microphone Init Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Microphone Init Helper 
 async function initMic() {
   try {
     if (!micStream) {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      console.log('âœ“ Microphone initialized');
+      console.log('Microphone initialized');
     }
   } catch (err) {
     console.warn('Microphone access not granted or failed:', err);
   }
 }
 
-// ─── Audio Capture (SYSTEM AUDIO ONLY — interviewer's voice) ────
+// Audio Capture (SYSTEM AUDIO ONLY - interviewer's voice) 
 async function startListening(isAutoRestart = false) {
   if (isListening) return;
   currentCycleProcessed = false;
@@ -120,9 +120,9 @@ async function startListening(isAutoRestart = false) {
   let usingMicFallback = false;
 
   try {
-    // 1. Capture SYSTEM audio ONLY â€” the interviewer's voice coming out
-    //    of the laptop. The user's microphone is NEVER mixed into the
-    //    recording, so their own voice can never become a "question".
+    // 1. Capture SYSTEM audio ONLY the interviewer's voice coming out
+    // of the laptop. The user's microphone is NEVER mixed into the
+    // recording, so their own voice can never become a "question".
     let sysTracks = [];
     try {
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
@@ -131,16 +131,16 @@ async function startListening(isAutoRestart = false) {
       });
       displayStream.getVideoTracks().forEach((t) => t.stop());
       sysTracks = displayStream.getAudioTracks();
-      if (sysTracks.length > 0) console.log('âœ“ System audio loopback captured');
+      if (sysTracks.length > 0) console.log('System audio loopback captured');
     } catch (sysErr) {
       console.warn('System audio capture failed:', sysErr);
     }
 
     if (sysTracks.length > 0) {
       audioStream = new MediaStream(sysTracks);
-      setStatus('listening', 'Listening for interviewer voice (system audio)...');
+      setStatus('listening','Listening for interviewer voice (system audio)...');
     } else {
-      // Last-resort fallback: system capture failed/crashed â†’ microphone.
+      // Last-resort fallback: system capture failed/crashed microphone.
       try {
         if (!micStream || !micStream.active) {
           micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -148,25 +148,25 @@ async function startListening(isAutoRestart = false) {
         if (!micStream || micStream.getAudioTracks().length === 0) throw new Error('no mic track');
         audioStream = new MediaStream(micStream.getAudioTracks());
         usingMicFallback = true;
-        console.warn('âš  System audio unavailable â€” mic fallback (your own voice may be captured)');
-        setStatus('listening', 'System audio unavailable â€” microphone mode');
+        console.warn('System audio unavailable mic fallback (your own voice may be captured)');
+        setStatus('listening','System audio unavailable - microphone mode');
       } catch (micErr) {
-        setStatus('error', 'System audio capture failed â€” restart the app and try again');
+        setStatus('error','System audio capture failed - restart the app and try again');
         isContinuousMode = false;
         stopListeningUI();
         return;
       }
     }
 
-    // 2. Analyser for silence detection (optional â€” broken audio devices
-    //    must never kill the capture flow)
-    const SILENCE_DURATION = 1200;      // stop 1.2s after speech ends (fast submit)
-    const MAX_CHUNK_DURATION = 20000;   // hard cap per recording cycle
-    const CALIBRATION_MS = 1200;        // measure ambient noise for 1.2s at start
+    // 2. Analyser for silence detection (optional broken audio devices
+    // must never kill the capture flow)
+    const SILENCE_DURATION = 1200; // stop 1.2s after speech ends (fast submit)
+    const MAX_CHUNK_DURATION = 20000; // hard cap per recording cycle
+    const CALIBRATION_MS = 1200; // measure ambient noise for 1.2s at start
 
     try {
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioContext.state === 'suspended') {
+      if (audioContext.state ==='suspended') {
         await audioContext.resume().catch(() => {});
       }
       const source = audioContext.createMediaStreamSource(audioStream);
@@ -176,16 +176,16 @@ async function startListening(isAutoRestart = false) {
       source.connect(analyser);
       dataArray = new Uint8Array(analyser.frequencyBinCount);
     } catch (ctxErr) {
-      console.warn('AudioContext unavailable â€” fixed-length recording mode:', ctxErr);
+      console.warn('AudioContext unavailable fixed-length recording mode:', ctxErr);
       audioContext = null;
       analyser = null;
     }
 
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
+      ?'audio/webm;codecs=opus'
       : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : '';
+        ?'audio/webm'
+        :'';
 
     const recorderOptions = mimeType ? { mimeType } : {};
     mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
@@ -202,9 +202,9 @@ async function startListening(isAutoRestart = false) {
       cleanupAudio();
 
       if (audioChunks.length === 0) {
-        setStatus('ready', 'Listening...');
+        setStatus('ready','Listening...');
         if (isContinuousMode) {
-          listenLabel.textContent = 'Listening...';
+          listenLabel.textContent ='Listening...';
           setTimeout(() => startListening(true), 300);
         } else {
           stopListeningUI();
@@ -212,16 +212,16 @@ async function startListening(isAutoRestart = false) {
         return;
       }
 
-      const actualMime = mimeType ? mimeType.split(';')[0] : 'audio/webm';
+      const actualMime = mimeType ? mimeType.split(';')[0] :'audio/webm';
       const audioBlob = new Blob(audioChunks, { type: actualMime });
 
-      // Discard very short recordings — notification clicks / brief
+      // Discard very short recordings - notification clicks / brief
       // background spikes are never real questions
       const recordedMs = Date.now() - recordStartMs;
       if (recordedMs < 1500) {
-        console.log(`Recording too short (${recordedMs}ms) — discarding`);
+        console.log(`Recording too short (${recordedMs}ms) - discarding`);
         if (isContinuousMode) {
-          listenLabel.textContent = 'Listening...';
+          listenLabel.textContent ='Listening...';
           setTimeout(() => startListening(true), 300);
         } else {
           stopListeningUI();
@@ -233,9 +233,9 @@ async function startListening(isAutoRestart = false) {
         const arrayBuffer = await audioBlob.arrayBuffer();
         const base64Audio = arrayBufferToBase64(arrayBuffer);
 
-        setStatus('thinking', 'âš¡ Transcribing question...');
+        setStatus('thinking','Transcribing question...');
         if (isContinuousMode) {
-          listenLabel.textContent = 'Transcribing...';
+          listenLabel.textContent ='Transcribing...';
         } else {
           stopListeningUI();
         }
@@ -247,32 +247,32 @@ async function startListening(isAutoRestart = false) {
             currentCycleProcessed = true;
             processQuestion(result.text.trim());
           } else if (result.success) {
-            // No speech in this chunk â€” keep listening
-            setStatus('listening', 'Listening for interview questions...');
-            loader.style.display = 'none';
+            // No speech in this chunk keep listening
+            setStatus('listening','Listening for interview questions...');
+            loader.style.display ='none';
             if (isContinuousMode) {
-              listenLabel.textContent = 'Listening...';
+              listenLabel.textContent ='Listening...';
               startListening(true);
             } else {
               stopListeningUI();
             }
           } else {
-            showError(result.error || 'Transcription failed');
+            showError(result.error ||'Transcription failed');
             if (isContinuousMode) {
-              listenLabel.textContent = 'Resuming...';
+              listenLabel.textContent ='Resuming...';
               setTimeout(() => startListening(true), 500);
             }
           }
         } catch (e) {
           showError('Transcription failed: ' + e.message);
           if (isContinuousMode) {
-            listenLabel.textContent = 'Resuming...';
+            listenLabel.textContent ='Resuming...';
             setTimeout(() => startListening(true), 1500);
           }
         }
       } else {
         if (isContinuousMode) {
-          listenLabel.textContent = 'Listening...';
+          listenLabel.textContent ='Listening...';
           setTimeout(() => startListening(true), 300);
         } else {
           stopListeningUI();
@@ -284,12 +284,12 @@ async function startListening(isAutoRestart = false) {
 
     isListening = true;
     btnListen.classList.add('active');
-    listenLabel.textContent = 'Listening...';
+    listenLabel.textContent ='Listening...';
     setStatus('listening', usingMicFallback
-      ? 'System audio unavailable â€” microphone mode'
-      : 'Listening for interviewer voice (system audio)...');
-    audioMeter.style.display = 'flex';
-    meterMic.style.width = '0%';
+      ?'System audio unavailable - microphone mode'
+      :'Listening for interviewer voice (system audio)...');
+    audioMeter.style.display ='flex';
+    meterMic.style.width ='0%';
 
     let maxChunkTimeout = null;
 
@@ -318,15 +318,15 @@ async function startListening(isAutoRestart = false) {
         }
 
         if (++meterTick % 6 === 0) {
-          meterSys.style.width = Math.min(100, avg * 3) + '%';
-          if (usingMicFallback) meterMic.style.width = Math.min(100, avg * 3) + '%';
+          meterSys.style.width = Math.min(100, avg * 3) +'%';
+          if (usingMicFallback) meterMic.style.width = Math.min(100, avg * 3) +'%';
         }
 
         if (avg > dynamicThreshold) {
           if (!hasSpeechStarted) {
             hasSpeechStarted = true;
-            setStatus('listening', 'ðŸŽ¤ Question detected â€” listening...');
-            listenLabel.textContent = 'Recording...';
+            setStatus('listening','Question detected - listening...');
+            listenLabel.textContent ='Recording...';
           }
           clearTimeout(silenceTimeout);
           silenceTimeout = null;
@@ -340,8 +340,8 @@ async function startListening(isAutoRestart = false) {
       }
       checkSilence();
     } else {
-      // No analyser â€” fixed 12s recording chunks
-      console.warn('âš  Fixed-length recording mode (12s chunks)');
+      // No analyser fixed 12s recording chunks
+      console.warn('Fixed-length recording mode (12s chunks)');
       maxChunkTimeout = setTimeout(() => {
         if (isListening) stopListening(false);
       }, 12000);
@@ -349,7 +349,7 @@ async function startListening(isAutoRestart = false) {
 
   } catch (e) {
     console.error('Audio capture setup error:', e);
-    setStatus('error', 'Audio capture error: ' + e.message);
+    setStatus('error','Audio capture error: ' + e.message);
     isContinuousMode = false;
     stopListeningUI();
   }
@@ -363,7 +363,7 @@ function stopListening(isManual = false) {
   clearTimeout(silenceTimeout);
   silenceTimeout = null;
 
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+  if (mediaRecorder && mediaRecorder.state !=='inactive') {
     mediaRecorder.stop();
   } else {
     cleanupAudio();
@@ -372,7 +372,7 @@ function stopListening(isManual = false) {
 }
 
 function cleanupAudio() {
-  if (audioContext && audioContext.state !== 'closed') {
+  if (audioContext && audioContext.state !=='closed') {
     audioContext.close().catch(() => {});
     audioContext = null;
   }
@@ -381,20 +381,20 @@ function cleanupAudio() {
 function stopListeningUI() {
   isListening = false;
   btnListen.classList.remove('active');
-  listenLabel.textContent = 'Start Listening';
-  audioMeter.style.display = 'none';
+  listenLabel.textContent ='Start Listening';
+  audioMeter.style.display ='none';
 }
 
-// â”€â”€â”€ Process Question â†’ Generate Answer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Process Question Generate Answer 
 async function processQuestion(question) {
   if (!question) return;
 
   console.log(`Processing question: "${question}"`);
   showQuestion(question);
   showLoader();
-  setStatus('thinking', 'Generating answer...');
+  setStatus('thinking','Generating answer...');
   if (isContinuousMode) {
-    listenLabel.textContent = 'Thinking...';
+    listenLabel.textContent ='Thinking...';
   }
 
   try {
@@ -403,23 +403,23 @@ async function processQuestion(question) {
     
     if (result.success) {
       if (isStreamingAnswer && answerTxt.textContent.length > 0) {
-        loader.style.display = 'none';
-        answerPH.style.display = 'none';
-        answerTxt.style.display = 'block';
+        loader.style.display ='none';
+        answerPH.style.display ='none';
+        answerTxt.style.display ='block';
         isStreamingAnswer = false;
       } else {
         showAnswer(result.answer);
       }
-      setStatus('ready', 'Answer ready âœ“');
+      setStatus('ready','Answer ready');
       if (isContinuousMode) {
-        listenLabel.textContent = 'Resuming...';
+        listenLabel.textContent ='Resuming...';
         setTimeout(() => startListening(true), 500);
       }
     } else {
       console.error('Answer generation failed:', result.error);
       showError(result.error);
       if (isContinuousMode) {
-        listenLabel.textContent = 'Resuming...';
+        listenLabel.textContent ='Resuming...';
         setTimeout(() => startListening(true), 1000);
       }
     }
@@ -427,46 +427,46 @@ async function processQuestion(question) {
     console.error('Answer generation exception:', e);
     showError('Failed to generate answer: ' + e.message);
     if (isContinuousMode) {
-      listenLabel.textContent = 'Resuming...';
+      listenLabel.textContent ='Resuming...';
       setTimeout(() => startListening(true), 2000);
     }
   }
 }
 
-// â”€â”€â”€ Event Listeners â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Event Listeners 
 
 btnListen.addEventListener('click', () => {
   if (isContinuousMode || isListening) {
     stopListening(true);
-    setStatus('ready', 'Ready');
+    setStatus('ready','Ready');
   } else {
     startListening();
   }
 });
 
 btnType.addEventListener('click', () => {
-  const vis = manualInput.style.display === 'none';
-  manualInput.style.display = vis ? 'flex' : 'none';
+  const vis = manualInput.style.display ==='none';
+  manualInput.style.display = vis ?'flex' :'none';
   if (vis) manualQ.focus();
 });
 
 btnSend.addEventListener('click', () => {
   const q = manualQ.value.trim();
   if (q) {
-    manualQ.value = '';
+    manualQ.value ='';
     processQuestion(q);
   }
 });
 manualQ.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') btnSend.click();
+  if (e.key ==='Enter') btnSend.click();
 });
 
 btnCopy.addEventListener('click', () => {
   const text = answerTxt.textContent;
-  if (text && answerTxt.style.display !== 'none') {
+  if (text && answerTxt.style.display !=='none') {
     navigator.clipboard.writeText(text);
-    btnCopy.textContent = 'âœ…';
-    setTimeout(() => btnCopy.textContent = 'ðŸ“‹', 1500);
+    btnCopy.textContent ='Copied';
+    setTimeout(() => btnCopy.textContent ='Copy', 1500);
   }
 });
 
@@ -474,22 +474,22 @@ btnSetup.addEventListener('click', () => window.api.showSetup());
 btnClose.addEventListener('click', () => window.api.hideOverlay());
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') window.api.hideOverlay();
+  if (e.key ==='Escape') window.api.hideOverlay();
 });
 
-// â”€â”€â”€ Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Init 
 window.api.onAnswerChunk((chunk) => {
-  if (loader.style.display !== 'none') {
-    loader.style.display = 'none';
-    answerPH.style.display = 'none';
-    answerTxt.style.display = 'block';
-    answerTxt.textContent = '';
+  if (loader.style.display !=='none') {
+    loader.style.display ='none';
+    answerPH.style.display ='none';
+    answerTxt.style.display ='block';
+    answerTxt.textContent ='';
     isStreamingAnswer = true;
   }
   answerTxt.textContent += chunk;
 });
 
-setStatus('ready', 'Ready â€” Click ðŸŽ¤ to capture interviewer audio');
+setStatus('ready','Ready');
 
 window.addEventListener('DOMContentLoaded', () => {
   initMic().then(() => {
