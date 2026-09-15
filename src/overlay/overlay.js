@@ -83,6 +83,20 @@ function showError(msg) {
 }
 
 // Helpers 
+// Noise guard: reject Whisper hallucinations from fan/room background noise
+// (short fragments, foreign-language gibberish, filler words)
+function isLikelyQuestion(text) {
+  const t = (text || '').trim();
+  if (t.length < 12) return false;                       // too short to be a question
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length < 3) return false;                    // at least 3 words
+  const foreign = (t.match(/[^a-zA-Z0-9 .,?!'"-:;()&/$%@#+\n]/g) || []).length;
+  if (foreign / t.length > 0.04) return false;           // foreign-language hallucination
+  const hallucination = /^(thank(s| you)?|thanks (for )?watching|okay+|ok|yeah|yes|no|hello+|hi+|bye+|tchau|obrigado|gracias|merci|arigato|danke|sorry|wow|umm*|hmm*)\b/i;
+  if (hallucination.test(t)) return false;               // noise/filler word picked from background
+  return true;
+}
+
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary ='';
@@ -243,9 +257,10 @@ async function startListening(isAutoRestart = false) {
 
         try {
           const result = await window.api.transcribeAudio(base64Audio, actualMime);
-          if (result.success && result.text && result.text.trim().length > 0) {
+          const transcribed = (result.success && result.text) ? result.text.trim() : '';
+          if (transcribed && isLikelyQuestion(transcribed)) {
             currentCycleProcessed = true;
-            processQuestion(result.text.trim());
+            processQuestion(transcribed);
           } else if (result.success) {
             // No speech in this chunk keep listening
             setStatus('listening','Listening for interview questions...');

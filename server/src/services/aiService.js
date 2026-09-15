@@ -125,9 +125,13 @@ function isLikelyQuestion(text) {
   const words = t.split(/\s+/).filter(Boolean);
   if (words.length < 3) return false;                    // at least 3 words
   // Reject non-English characters (foreign-language hallucinations like
-  // Icelandic þ/ð, CJK, Cyrillic etc.)
-  const foreignChars = (t.match(/[^a-zA-Z0-9 .,?!'"’\-:;()&/$%@#+\n]/g) || []).length;
+  // Icelandic _/d, CJK, Cyrillic etc.)
+  const foreignChars = (t.match(/[^a-zA-Z0-9 .,?!'"'\-:;()&/$%@#+\n]/g) || []).length;
   if (foreignChars / t.length > 0.04) return false;
+  // Reject common Whisper hallucinations from fan/room background noise
+  // (filler words, greetings, sign-offs in any language)
+  const hallucination = /^(thank(s| you)?|thanks (for )?watching|okay+|ok|yeah|yes|no|hello+|hi+|bye+|tchau|obrigado|gracias|merci|arigato|danke|sorry|wow|umm*|hmm*|bye bye|see you|goodbye)\b/i;
+  if (hallucination.test(t)) return false;
   return true;
 }
 
