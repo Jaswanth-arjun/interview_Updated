@@ -42,6 +42,8 @@ let micStream = null;
 
 // Track whether answer is currently streaming
 let isStreamingAnswer = false;
+let currentCycleProcessed = false;
+
 
 // ─── Status Helpers ──────────────────────────────────────────
 function setStatus(state, text) {
@@ -148,7 +150,8 @@ function initSpeechRecognition() {
       clearTimeout(speechRecSilenceTimeout);
       speechRecSilenceTimeout = setTimeout(() => {
         const fullQ = accumulatedTranscript.trim();
-        if (fullQ.length > 5 && isListening) {
+        if (fullQ.length > 5 && isListening && !currentCycleProcessed) {
+          currentCycleProcessed = true;
           console.log(`✓ Web Speech Recognition detected question: "${fullQ}"`);
           accumulatedTranscript = '';
           processQuestion(fullQ);
@@ -196,6 +199,7 @@ function stopSpeechRecognition() {
 // ─── Audio Capture (System Audio + Microphone Merged Stream) ────
 async function startListening(isAutoRestart = false) {
   if (isListening) return;
+  currentCycleProcessed = false;
   if (!isAutoRestart) {
     isContinuousMode = true;
   }
@@ -264,8 +268,8 @@ async function startListening(isAutoRestart = false) {
 
     audioStream = dest.stream;
 
-    const SILENCE_THRESHOLD = 5;
-    const SILENCE_DURATION = 2000;
+    const SILENCE_THRESHOLD = 2;
+    const SILENCE_DURATION = 1800;
     const MAX_CHUNK_DURATION = 30000;
 
     let hasSpeechStarted = false;
@@ -306,7 +310,7 @@ async function startListening(isAutoRestart = false) {
       const audioBlob = new Blob(audioChunks, { type: actualMime });
 
       // Fallback transcription if Web Speech Recognition didn't already process it
-      if (audioBlob.size >= 200 && questionTxt.textContent.trim().length === 0) {
+      if (audioBlob.size >= 200 && !currentCycleProcessed) {
         const arrayBuffer = await audioBlob.arrayBuffer();
         const base64Audio = arrayBufferToBase64(arrayBuffer);
 
@@ -323,6 +327,7 @@ async function startListening(isAutoRestart = false) {
           if (result.success && result.text) {
             const question = result.text.trim();
             if (question.length > 0) {
+              currentCycleProcessed = true;
               processQuestion(question);
             } else {
               setStatus('listening', 'Listening for interview questions...');
