@@ -110,6 +110,13 @@ async function initMic() {
 }
 
 // ─── Real-Time Speech Recognition (Web Speech API) ─────────────
+// NOTE: webkitSpeechRecognition fails with "network" errors in Electron
+// (Google's speech backend isn't available outside Chrome). We disable
+// the engine after repeated failures — Groq Whisper transcription of the
+// recorded audio is the primary question detection path anyway.
+let speechRecFailureCount = 0;
+const SPEECH_REC_MAX_FAILURES = 3;
+
 function initSpeechRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
@@ -160,11 +167,19 @@ function initSpeechRecognition() {
     };
 
     recognition.onerror = (event) => {
-      console.warn('SpeechRecognition error:', event.error);
+      if (event.error === 'network' || event.error === 'service-not-allowed' || event.error === 'not-allowed') {
+        speechRecFailureCount++;
+        if (speechRecFailureCount === SPEECH_REC_MAX_FAILURES) {
+          console.warn('SpeechRecognition unusable in Electron — disabling engine, relying on Whisper transcription');
+          recognition = null;
+        }
+      } else {
+        console.warn('SpeechRecognition error:', event.error);
+      }
     };
 
     recognition.onend = () => {
-      if (isListening && isContinuousMode) {
+      if (recognition && isListening && isContinuousMode) {
         try { recognition.start(); } catch (e) {}
       }
     };
@@ -176,7 +191,7 @@ function initSpeechRecognition() {
 }
 
 function startSpeechRecognition() {
-  if (recognition) {
+  if (recognition && speechRecFailureCount < SPEECH_REC_MAX_FAILURES) {
     accumulatedTranscript = '';
     try {
       recognition.start();
