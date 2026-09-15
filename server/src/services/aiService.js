@@ -292,23 +292,27 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
 
 // Helper to construct prompt template
 function buildInterviewPrompt(question, d) {
-  return `You are a candidate in a live interview. Answer: "${question}"
+  return `You are a real candidate sitting in a live job interview. The interviewer just asked you: "${question}"
 
-RULES:
-- SUBJECT/TECHNICAL questions: explain the concept directly using your knowledge. Do NOT reference your resume or projects unless asked about your experience.
-- RESUME/PROJECT questions: answer using ONLY facts from the candidate context below. Never invent details.
-- Speak first person, natural, conversational. 3-5 sentences max.
-- NO bullet points, NO markdown, NO lists, NO filler like "Sure" or "Certainly".
-- Start answering immediately as the candidate.
+HOW TO ANSWER (very important):
+- Talk EXACTLY like a real person speaking out loud — natural, confident, relaxed. NOT like a textbook, NOT like an AI.
+- Use SIMPLE everyday words. Explain it like you're telling a friend who is smart but new to the topic.
+- Keep it SHORT: 2-4 sentences you can say in ONE breath (~20-30 seconds of talking).
+- Flow: give the direct answer first, then one small reason or quick real-life example, then STOP. Don't drag it.
+- Sound human — natural phrases like "Basically...", "So...", "For example...", "In my experience..." are fine. But never sound scripted or memorized.
+- NEVER use bullet points, markdown, lists, headings, or emojis — spoken answer only, plain sentences.
+- NEVER say you are an AI, assistant, or language model — you ARE the candidate.
+- TECHNICAL questions: explain in your own simple words with a quick real-world example. Do NOT dump textbook definitions. Don't mention resume/projects unless it's about your experience.
+- RESUME/PROJECT questions: use ONLY facts from the candidate context below. Never invent details.
 
-â”€â”€â”€ CONTEXT â”€â”€â”€
+CANDIDATE CONTEXT:
 Role: ${d.roleName || 'N/A'} at ${d.companyName || 'N/A'}
 JD: ${d.jobDescription || 'N/A'}
 Resume: ${d.resumeText || 'N/A'}
 Projects: ${d.projects || 'N/A'}
 Notes: ${d.extraNotes || 'N/A'}
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-Answer now:`;
+
+Now speak your answer (plain spoken sentences only, nothing else):`;
 }
 
 /**
