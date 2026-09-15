@@ -190,6 +190,7 @@ async function startListening(isAutoRestart = false) {
     const recorderOptions = mimeType ? { mimeType } : {};
     mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
     audioChunks = [];
+    const recordStartMs = Date.now();
 
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) audioChunks.push(e.data);
@@ -213,6 +214,20 @@ async function startListening(isAutoRestart = false) {
 
       const actualMime = mimeType ? mimeType.split(';')[0] : 'audio/webm';
       const audioBlob = new Blob(audioChunks, { type: actualMime });
+
+      // Discard very short recordings — notification clicks / brief
+      // background spikes are never real questions
+      const recordedMs = Date.now() - recordStartMs;
+      if (recordedMs < 1500) {
+        console.log(`Recording too short (${recordedMs}ms) — discarding`);
+        if (isContinuousMode) {
+          listenLabel.textContent = 'Listening...';
+          setTimeout(() => startListening(true), 300);
+        } else {
+          stopListeningUI();
+        }
+        return;
+      }
 
       if (audioBlob.size >= 200) {
         const arrayBuffer = await audioBlob.arrayBuffer();

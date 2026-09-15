@@ -107,7 +107,28 @@ function buildAudioFormData(base64Audio, mimeType, modelName) {
   const blob = new Blob([buffer], { type: mimeType || 'audio/webm' });
   formData.append('file', blob, `audio.${ext}`);
   formData.append('model', modelName);
+  // Lock Whisper to English and reduce hallucinations on noise/silence —
+  // without this, background sounds get "transcribed" as random foreign
+  // languages (e.g. Icelandic "Hvað er það?").
+  formData.append('language', 'en');
+  formData.append('temperature', '0');
+  formData.append('prompt', 'The speaker asks job interview questions in clear English.');
   return formData;
+}
+
+// Filter out noise/hallucination transcriptions that are clearly NOT
+// real interviewer questions (e.g. random foreign-language gibberish,
+// single words picked from background sounds).
+function isLikelyQuestion(text) {
+  const t = (text || '').trim();
+  if (t.length < 12) return false;                       // too short to be a question
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length < 3) return false;                    // at least 3 words
+  // Reject non-English characters (foreign-language hallucinations like
+  // Icelandic þ/ð, CJK, Cyrillic etc.)
+  const foreignChars = (t.match(/[^a-zA-Z0-9 .,?!'"’\-:;()&/$%@#+\n]/g) || []).length;
+  if (foreignChars / t.length > 0.04) return false;
+  return true;
 }
 
 /**
@@ -149,7 +170,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
           isTrial
         });
 
-        return { success: true, text: cleaned };
+        return { success: true, text: isLikelyQuestion(cleaned) ? cleaned : '' };
       }
       errors.push(`Groq Whisper HTTP ${response.status}`);
     } catch (e) {
@@ -186,7 +207,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
           isTrial
         });
 
-        return { success: true, text: cleaned };
+        return { success: true, text: isLikelyQuestion(cleaned) ? cleaned : '' };
       }
       errors.push(`OmniRoute Whisper HTTP ${response.status}`);
     } catch (e) {
@@ -226,7 +247,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
           isTrial
         });
 
-        return { success: true, text: cleaned };
+        return { success: true, text: isLikelyQuestion(cleaned) ? cleaned : '' };
       } catch (e) {
         logger.warn(`Gemini Transcription Key #${activeKey.index} failed: ${e.message}`);
         errors.push(`Gemini #${activeKey.index}: ${e.message}`);
@@ -263,7 +284,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
             isTrial
           });
 
-          return { success: true, text: cleaned };
+          return { success: true, text: isLikelyQuestion(cleaned) ? cleaned : '' };
         }
       } catch (e) {
         errors.push(`Fallback Groq: ${e.message}`);
