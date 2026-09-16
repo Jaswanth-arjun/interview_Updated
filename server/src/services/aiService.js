@@ -596,5 +596,214 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
 
 module.exports = {
   transcribeAudio,
-  generateAnswerStream
+  generateAnswerStream,
+  generateChatStream
 };
+
+// ─── RAG Chat Assistant ──────────────────────────────────────────
+
+const APP_KNOWLEDGE = `The Interview Copilot app lets candidates practice live interviews:
+- It listens to system audio, transcribes the interviewer's question and streams a spoken-style answer grounded in the candidate's saved profile (resume, job description, projects, notes).
+- Profile is configured in the Setup window (resume PDF, JD, projects, extra notes).
+- The Overlay (Ctrl+Shift+A) shows questions/answers during practice; the Chat Assistant (Ctrl+Shift+C) answers app/profile/LinkedIn questions.
+- Recharge & usage is wallet-based (Razorpay). Free trial users get a limited number of requests.`;
+
+function buildChatPrompt(question, { history = [], profileData = {}, linkedinContext = null } = {}) {
+  const historyText = (history || [])
+    .slice(-6)
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n');
+
+  const profileText = profileData && (profileData.resumeText || profileData.jobDescription)
+    ? `Role: ${profileData.roleName || 'N/A'} at ${profileData.companyName || 'N/A'}
+JD: ${profileData.jobDescription || 'N/A'}
+Resume: ${profileData.resumeText || 'N/A'}
+Projects: ${profileData.projects || 'N/A'}
+Notes: ${profileData.extraNotes || 'N/A'}`
+    : 'No profile saved yet.';
+
+  const linkedinText = linkedinContext
+    ? JSON.stringify(linkedinContext, null, 1)
+    : 'No LinkedIn data available for this question.';
+
+  return `You are "Copilot Assistant", the built-in RAG assistant of the Interview Copilot desktop app.
+
+ABOUT THE APP (for app-related questions):
+${APP_KNOWLEDGE}
+
+RULES (very important):
+- Answer the user's question helpfully and concisely. Use natural, conversational language.
+- Ground EVERY factual claim in the context below. NEVER invent people, companies, messages, campaigns, dates or any data that is not explicitly in the context.
+- For LinkedIn network questions, reason over the LINKEDIN DATA: to find people at a company use the connections list (check their headline/title for the company); to find who replied to your messages, match message thread participants against those people AND check "lastMessageFromMe" — false means the other person sent the last message (i.e. they replied), true means you sent the last message.
+- If the LINKEDIN DATA is empty, has empty connections/messages arrays, or contains a "dataQualityNote", do NOT claim the user has 0 connections or 0 replies as a fact — instead say you could not complete the LinkedIn check right now and suggest clicking "LinkedIn" in the chat top bar to reconnect, or checking LinkedIn manually.
+- If LINKEDIN DATA does contain the answer, state it plainly with the names you found.
+- App/profile questions: use ABOUT THE APP and CANDIDATE PROFILE.
+- Small markdown formatting (bold, short bullet lists) is allowed.
+
+CONVERSATION HISTORY:
+${historyText || '(new conversation)'}
+
+CANDIDATE PROFILE:
+${profileText}
+
+LINKEDIN DATA (scraped live from the user's own LinkedIn account just now):
+${linkedinText}
+
+USER QUESTION: ${question}
+
+Answer:`;
+}
+
+/**
+ * Consume an OpenAI-compatible SSE stream, calling sendChunk per token.
+ */
+async function consumeOpenAIStream(response, sendChunk) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+
+    for (const line of lines) {
+      const cleanLine = line.trim();
+      if (!cleanLine.startsWith('data: ') || cleanLine.includes('[DONE]')) continue;
+      try {
+        const parsed = JSON.parse(cleanLine.slice(6));
+        const text = parsed.choices[0]?.delta?.content || '';
+        if (text) sendChunk(text);
+      } catch {}
+    }
+  }
+}
+
+/**
+ * RAG Chat: answers app / profile / LinkedIn-network questions.
+ * Streams the answer to the client via Server-Sent Events (SSE).
+ */
+async function generateChatStream(userId, question, context, res, isTrial, isSlow = true) {
+  const start = Date.now();
+  const prompt = buildChatPrompt(question, context || {});
+  const errors = [];
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  let fullAnswerText = '';
+  let providerUsed = '';
+  let modelUsed = '';
+
+  const sendChunk = (text) => {
+    fullAnswerText += text;
+    res.write(`data: ${JSON.stringify({ chunk: text })}\n\n`);
+  };
+
+  const messages = [{ role: 'user', content: prompt }];
+
+  // 1. Groq (fast)
+  if (config.ai.groqKey) {
+    try {
+      const model = isSlow ? 'openai/gpt-oss-120b' : 'openai/gpt-oss-20b';
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.ai.groqKey}`
+        },
+        body: JSON.stringify({ model, messages, stream: true })
+      });
+      if (response.ok) {
+        await consumeOpenAIStream(response, sendChunk);
+        providerUsed = 'groq';
+        modelUsed = model;
+      } else {
+        errors.push(`Groq HTTP ${response.status}`);
+      }
+    } catch (e) {
+      errors.push(`Groq: ${e.message}`);
+    }
+  }
+
+  // 2. OmniRoute fallback
+  if (!providerUsed && config.ai.omniRoute.apiKey) {
+    try {
+      const response = await fetch(`${config.ai.omniRoute.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.ai.omniRoute.apiKey}`
+        },
+        body: JSON.stringify({ model: config.ai.omniRoute.model, messages, stream: true })
+      });
+      if (response.ok) {
+        await consumeOpenAIStream(response, sendChunk);
+        providerUsed = 'omniroute';
+        modelUsed = config.ai.omniRoute.model;
+      } else {
+        errors.push(`OmniRoute HTTP ${response.status}`);
+      }
+    } catch (e) {
+      errors.push(`OmniRoute: ${e.message}`);
+    }
+  }
+
+  // 3. Gemini fallback
+  if (!providerUsed && config.ai.geminiKeys.length > 0) {
+    for (let i = 0; i < config.ai.geminiKeys.length; i++) {
+      const activeKey = getNextGeminiKey();
+      if (!activeKey) continue;
+      try {
+        const genAI = new GoogleGenerativeAI(activeKey.key);
+        const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+        const resultStream = await model.generateContentStream(prompt);
+        for await (const chunk of resultStream.stream) {
+          const text = chunk.text();
+          if (text) sendChunk(text);
+        }
+        providerUsed = 'gemini';
+        modelUsed = 'gemini-3.6-flash';
+        break;
+      } catch (e) {
+        errors.push(`Gemini #${activeKey.index}: ${e.message}`);
+      }
+    }
+  }
+
+  const latencyMs = Date.now() - start;
+
+  if (providerUsed) {
+    await meterService.logAndMeterUsage(userId, {
+      requestType: 'chat',
+      provider: providerUsed,
+      model: modelUsed,
+      promptTokens: Math.round(prompt.split(/\s+/).length * 1.33),
+      completionTokens: Math.round(fullAnswerText.split(/\s+/).length * 1.33),
+      costPaise: config.pricing.generateGroq,
+      latencyMs,
+      success: true,
+      question,
+      isTrial
+    });
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
+  } else {
+    await meterService.logAndMeterUsage(userId, {
+      requestType: 'chat',
+      provider: 'failed',
+      model: 'none',
+      costPaise: 0,
+      latencyMs,
+      success: false,
+      errorMessage: errors.join('; '),
+      question,
+      isTrial
+    });
+    res.write(`data: ${JSON.stringify({ error: `AI generation failed: ${errors.join(', ')}` })}\n\n`);
+    res.end();
+  }
+}

@@ -14,6 +14,18 @@ contextBridge.exposeInMainWorld('api', {
   onAnswerChunk: (callback) => ipcRenderer.on('answer-chunk', (event, chunk) => callback(chunk)),
   transcribeAudio: (base64Audio, mimeType) => ipcRenderer.invoke('transcribe-audio', base64Audio, mimeType),
 
+  // RAG Chat Assistant & LinkedIn
+  sendChatMessage: (question, history, onChunk) => {
+    const listener = (event, chunk) => onChunk(chunk);
+    ipcRenderer.on('chat-chunk', listener);
+    return ipcRenderer.invoke('chat-send', question, history).finally(() => {
+      ipcRenderer.removeListener('chat-chunk', listener);
+    });
+  },
+  onChatStatus: (callback) => ipcRenderer.on('chat-status', (event, status) => callback(status)),
+  connectLinkedIn: () => ipcRenderer.invoke('linkedin-connect'),
+  getLinkedInStatus: () => ipcRenderer.invoke('linkedin-status'),
+
   // Auth, Machine ID & Credits
   getMachineId: () => ipcRenderer.invoke('get-machine-id'),
   getLocalSession: () => ipcRenderer.invoke('get-local-session'),

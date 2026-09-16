@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>Assistant</title>
+  <link rel="stylesheet" href="chat.css" />
+</head>
+<body>
+  <div class="chat-container">
+    <!-- Title bar -->
+    <div class="titlebar" id="titlebar">
+      <div class="titlebar-drag">
+        <span class="app-title">Assistant</span>
+      </div>
+      <div class="titlebar-actions">
+        <button id="linkedinBtn" class="linkedin-btn" title="Connect your LinkedIn account">
+          <span class="li-dot" id="liDot"></span>
+          LinkedIn
+        </button>
+        <button id="clearBtn" class="icon-btn" title="Clear chat">&#x21bb;</button>
+        <button id="closeBtn" class="icon-btn" title="Close">&#x2715;</button>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div class="messages" id="messages">
+      <div class="welcome">
+        <div class="welcome-icon">&#x1f916;</div>
+        <h3>Ask me anything</h3>
+        <p>App questions, your profile, or your LinkedIn network — e.g. <em>"Who among my LinkedIn connections currently works at MongoDB?"</em></p>
+      </div>
+    </div>
+
+    <!-- Thinking indicator -->
+    <div class="status" id="status" hidden>
+      <span class="spinner"></span>
+      <span id="statusText">Thinking...</span>
+    </div>
+
+    <!-- Input -->
+    <div class="input-row">
+      <textarea id="input" rows="1" placeholder="Type your question..."></textarea>
+      <button id="sendBtn" title="Send">&#x27A4;</button>
+    </div>
+  </div>
+
+  <script src="chat.js"></script>
+</body>
+</html>

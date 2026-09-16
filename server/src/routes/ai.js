@@ -125,4 +125,48 @@ router.post('/generate', optionalAuth, aiLimiter, async (req, res, next) => {
   }
 });
 
+/**
+ * POST /ai/chat
+ * RAG Chat Assistant — answers app / profile / LinkedIn-network questions.
+ * Streams the answer via SSE, grounded in the candidate profile and
+ * (for LinkedIn questions) live LinkedIn data scraped client-side.
+ */
+router.post('/chat', optionalAuth, aiLimiter, async (req, res, next) => {
+  try {
+    const { question, history, linkedinContext } = req.body;
+    if (!question) {
+      return res.status(400).json({ success: false, error: 'Question is required' });
+    }
+
+    const session = await resolveSessionContext(req);
+
+    if (!session.isDemo) {
+      const quota = await walletService.checkQuota(session.userId, 'generate');
+      if (!quota.allowed) {
+        return res.status(402).json({ success: false, error: quota.reason });
+      }
+    }
+
+    // Retrieve stored profile as grounding context
+    let profileData = {};
+    if (!session.isDemo) {
+      const stored = await prisma.profileData.findUnique({
+        where: { userId: session.userId }
+      });
+      if (stored) profileData = stored;
+    }
+
+    await aiService.generateChatStream(
+      session.userId,
+      question,
+      { history, profileData, linkedinContext },
+      res,
+      session.isTrial,
+      session.isSlow
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

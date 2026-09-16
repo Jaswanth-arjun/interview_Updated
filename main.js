@@ -18,6 +18,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
 const { applyFullStealth, removeFullStealth } = require('./screen-protect');
+const linkedinManager = require('./linkedin-manager');
 const REMOTE_BACKEND_URL = 'https://interview-updated.onrender.com';
 const LOCAL_BACKEND_URL = 'http://localhost:4000';
 
@@ -52,6 +53,7 @@ const sessionPath = path.join(app.getPath('userData'), 'session-auth.json');
 // ─── State ───────────────────────────────────────────────────────
 let setupWindow = null;
 let overlayWindow = null;
+let chatWindow = null;
 let tray = null;
 let isOverlayVisible = false;
 
@@ -309,6 +311,41 @@ function applyOverlayProtection() {
   }
 }
 
+function createChatWindow() {
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow.show();
+    chatWindow.focus();
+    return;
+  }
+
+  const { width } = screen.getPrimaryDisplay().workAreaSize;
+
+  chatWindow = new BrowserWindow({
+    width: 420,
+    height: 640,
+    x: width - 450,
+    y: 60,
+    frame: false,
+    backgroundColor: '#08081a',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+    show: false,
+  });
+
+  chatWindow.loadFile(path.join(__dirname, 'src/chat/chat.html'));
+  chatWindow.once('ready-to-show', () => {
+    chatWindow.show();
+    chatWindow.focus();
+  });
+  chatWindow.on('closed', () => { chatWindow = null; });
+}
+
 function toggleOverlay() {
   if (!overlayWindow) return;
   if (isOverlayVisible) {
@@ -360,6 +397,10 @@ function createTray() {
       {
         label: 'Toggle Overlay  (Ctrl+Shift+A)',
         click: toggleOverlay,
+      },
+      {
+        label: 'Chat Assistant  (Ctrl+Shift+C)',
+        click: () => createChatWindow(),
       },
       { type: 'separator' },
       { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } },
@@ -805,6 +846,103 @@ function registerIPC() {
     }
   });
 
+  // ─── RAG Chat Assistant ────────────────────────────────────────
+  ipcMain.handle('chat-send', async (e, question, history = []) => {
+    const webContents = e.sender;
+    try {
+      // Route LinkedIn-related questions through the background
+      // LinkedIn session; everything else goes straight to the RAG chat.
+      let linkedinContext = null;
+      let linkedinError = null;
+
+      if (linkedinManager.isLinkedInQuestion(question)) {
+        webContents.send('chat-status', 'Checking your LinkedIn in the background...');
+        const res = await linkedinManager.collectContext(question);
+        if (res.success) {
+          linkedinContext = res.context;
+        } else {
+          linkedinError = res.error;
+        }
+      }
+
+      if (linkedinError && !linkedinContext) {
+        return { success: false, error: `${linkedinError} (Tip: click "LinkedIn" in the top bar to connect your account.)` };
+      }
+
+      webContents.send('chat-status', linkedinContext ? 'Generating answer...' : 'Thinking...');
+
+      const response = await apiFetch('/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, history, linkedinContext })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return { success: false, error: errorData.error || 'AI request failed' };
+      }
+
+      // Stream SSE response chunks from backend to chat renderer
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullAnswerText = '';
+
+      const handleSSELine = (line) => {
+        const cleanLine = line.trim();
+        if (!cleanLine.startsWith('data: ')) return;
+        try {
+          const parsed = JSON.parse(cleanLine.slice(6));
+          if (parsed.chunk) {
+            fullAnswerText += parsed.chunk;
+            webContents.send('chat-chunk', parsed.chunk);
+          } else if (parsed.error) {
+            return { success: false, error: parsed.error };
+          }
+        } catch {}
+        return null;
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          const failed = handleSSELine(line);
+          if (failed) return failed;
+        }
+      }
+
+      if (buffer && buffer.trim()) {
+        handleSSELine(buffer);
+      }
+
+      return { success: true, answer: fullAnswerText };
+    } catch (e) {
+      return { success: false, error: e.message };
+    } finally {
+      webContents.send('chat-status', '');
+    }
+  });
+
+  ipcMain.handle('linkedin-connect', async () => {
+    try {
+      return await linkedinManager.connect();
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('linkedin-status', async () => {
+    try {
+      return await linkedinManager.getStatus();
+    } catch (e) {
+      return { success: false, connected: false, error: e.message };
+    }
+  });
+
   // File system & window controls
   ipcMain.handle('open-file-dialog', async () => {
     const result = await dialog.showOpenDialog(setupWindow, {
@@ -874,9 +1012,13 @@ app.whenReady().then(() => {
   createTray();
 
   globalShortcut.register('CommandOrControl+Shift+A', toggleOverlay);
+  globalShortcut.register('CommandOrControl+Shift+C', () => createChatWindow());
 });
 
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+  linkedinManager.destroy();
+});
 
 app.on('window-all-closed', () => {
   // Remain in tray
