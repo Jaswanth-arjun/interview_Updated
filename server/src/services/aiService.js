@@ -39,7 +39,7 @@ function markGroqFailed(statusCode) {
 function markOmniRouteFailed(isConnRefused = false) {
   if (isConnRefused) {
     logger.warn('⚠️ OmniRoute local proxy is offline. Temporarily bypassing OmniRoute to route instantly to Gemini.');
-    omniRouteDisabledUntil = Date.now() + 10 * 60 * 1000;
+    omniRouteDisabledUntil = Date.now() + 24 * 60 * 60 * 1000;
   }
 }
 
@@ -150,9 +150,9 @@ function buildAudioFormData(base64Audio, mimeType, modelName) {
 // single words picked from background sounds).
 function isLikelyQuestion(text) {
   const t = (text || '').trim();
-  if (t.length < 12) return false;                       // too short to be a question
+  if (t.length < 8) return false;                        // too short (at least 8 chars, e.g. "Why Java?")
   const words = t.split(/\s+/).filter(Boolean);
-  if (words.length < 3) return false;                    // at least 3 words
+  if (words.length < 2) return false;                    // at least 2 words (e.g. "Explain Redux")
   // Reject non-English characters (foreign-language hallucinations like
   // Icelandic _/d, CJK, Cyrillic etc.)
   const foreignChars = (t.match(/[^a-zA-Z0-9 .,?!'"'\-:;()&/$%@#+\n]/g) || []).length;
@@ -290,43 +290,6 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
     }
   }
 
-  // 3. Fallback transcription if everything failed and we are in slow/demo mode
-  if (isSlow) {
-    if (config.ai.groqKey) {
-      try {
-        logger.info(`Slow path fallback: Transcribing via Groq Whisper...`);
-        const response = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${config.ai.groqKey}` },
-          body: buildAudioFormData(base64Audio, mimeType, 'whisper-large-v3-turbo')
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const text = data.text?.trim();
-          const cleaned = cleanTranscriptionText(text);
-          const latencyMs = Date.now() - start;
-
-          await meterService.logAndMeterUsage(userId, {
-            requestType: 'transcribe',
-            provider: 'groq',
-            model: 'whisper-large-v3-turbo',
-            audioDurationMs,
-            costPaise: config.pricing.transcribe,
-            latencyMs,
-            success: true,
-            question: cleaned,
-            isTrial
-          });
-
-          return { success: true, text: isLikelyQuestion(cleaned) ? cleaned : '' };
-        }
-      } catch (e) {
-        errors.push(`Fallback Groq: ${e.message}`);
-      }
-    }
-  }
-
   // Record failure to DB
   await meterService.logAndMeterUsage(userId, {
     requestType: 'transcribe',
@@ -399,6 +362,8 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
   if (isGroqAvailable()) {
     try {
       logger.info(`⚡ Generating answer via Groq...`);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -410,8 +375,10 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
           messages: [{ role: 'user', content: prompt }],
           stream: true,
           max_tokens: 1200
-        })
+        }),
+        signal: controller.signal
       });
+      clearTimeout(timer);
 
       if (response.ok) {
         const reader = response.body.getReader();
@@ -538,59 +505,6 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
       } catch (e) {
         logger.warn(`Gemini Generation Key #${activeKey.index} failed: ${e.message}`);
         errors.push(`Gemini #${activeKey.index}: ${e.message}`);
-      }
-    }
-  }
-
-  // 3. Fallback generation if slow path failed
-  if (!providerUsed && isSlow) {
-    if (config.ai.groqKey) {
-      try {
-        logger.info(`Slow path fallback: Generating via Groq...`);
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.ai.groqKey}`
-          },
-          body: JSON.stringify({
-            model: 'openai/gpt-oss-120b',
-            messages: [{ role: 'user', content: prompt }],
-            stream: true
-          })
-        });
-
-        if (response.ok) {
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop();
-
-            for (const line of lines) {
-              const cleanLine = line.trim();
-              if (cleanLine.startsWith('data: ')) {
-                if (cleanLine.includes('[DONE]')) continue;
-                try {
-                  const parsed = JSON.parse(cleanLine.slice(6));
-                  const text = parsed.choices[0]?.delta?.content || '';
-                  if (text) sendChunk(text);
-                } catch {}
-              }
-            }
-          }
-
-          providerUsed = 'groq';
-          modelUsed = 'openai/gpt-oss-120b';
-          costPaise = config.pricing.generateGroq;
-        }
-      } catch (e) {
-        errors.push(`Fallback Groq generation failed: ${e.message}`);
       }
     }
   }

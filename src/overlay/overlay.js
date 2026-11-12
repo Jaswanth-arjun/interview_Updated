@@ -87,12 +87,12 @@ function showError(msg) {
 // (short fragments, foreign-language gibberish, filler words)
 function isLikelyQuestion(text) {
   const t = (text || '').trim();
-  if (t.length < 12) return false;                       // too short to be a question
+  if (t.length < 8) return false;                        // too short (at least 8 chars, e.g. "Why Java?")
   const words = t.split(/\s+/).filter(Boolean);
-  if (words.length < 3) return false;                    // at least 3 words
+  if (words.length < 2) return false;                    // at least 2 words (e.g. "Explain Redux")
   const foreign = (t.match(/[^a-zA-Z0-9 .,?!'"-:;()&/$%@#+\n]/g) || []).length;
   if (foreign / t.length > 0.04) return false;           // foreign-language hallucination
-  const hallucination = /^(thank(s| you)?|thanks (for )?watching|okay+|ok|yeah|yes|no|hello+|hi+|bye+|tchau|obrigado|gracias|merci|arigato|danke|sorry|wow|umm*|hmm*)\b/i;
+  const hallucination = /^(thank(s| you)?|thanks (for )?watching|okay+|ok|yeah|yes|no|hello+|hi+|bye+|tchau|obrigado|gracias|merci|arigato|danke|sorry|wow|umm*|hmm*|bye bye|see you|goodbye)\b/i;
   if (hallucination.test(t)) return false;               // noise/filler word picked from background
   return true;
 }
@@ -174,9 +174,8 @@ async function startListening(isAutoRestart = false) {
 
     // 2. Analyser for silence detection (optional broken audio devices
     // must never kill the capture flow)
-    const SILENCE_DURATION = 650; // stop 650ms after speech ends (fast submit)
+    const SILENCE_DURATION = 400; // stop 400ms after speech ends (ultra-fast submit)
     const MAX_CHUNK_DURATION = 15000; // hard cap per recording cycle
-    const CALIBRATION_MS = 1200; // measure ambient noise for 1.2s at start
 
     try {
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -204,10 +203,20 @@ async function startListening(isAutoRestart = false) {
     const recorderOptions = mimeType ? { mimeType } : {};
     mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
     audioChunks = [];
+    let preSpeechChunks = [];
+    let speechStartMs = null;
     const recordStartMs = Date.now();
 
     mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) audioChunks.push(e.data);
+      if (e.data.size > 0) {
+        if (!hasSpeechStarted) {
+          // Rolling pre-speech buffer: keep only last 2 slices (~400ms) to avoid sending seconds of silence
+          preSpeechChunks.push(e.data);
+          if (preSpeechChunks.length > 2) preSpeechChunks.shift();
+        } else {
+          audioChunks.push(e.data);
+        }
+      }
     };
 
     mediaRecorder.onstop = async () => {
@@ -219,7 +228,7 @@ async function startListening(isAutoRestart = false) {
         setStatus('ready','Listening...');
         if (isContinuousMode) {
           listenLabel.textContent ='Listening...';
-          setTimeout(() => startListening(true), 300);
+          setTimeout(() => startListening(true), 200);
         } else {
           stopListeningUI();
         }
@@ -231,12 +240,12 @@ async function startListening(isAutoRestart = false) {
 
       // Discard very short recordings - notification clicks / brief
       // background spikes are never real questions
-      const recordedMs = Date.now() - recordStartMs;
-      if (recordedMs < 600) {
+      const recordedMs = speechStartMs ? (Date.now() - speechStartMs) : (Date.now() - recordStartMs);
+      if (recordedMs < 400) {
         console.log(`Recording too short (${recordedMs}ms) - discarding`);
         if (isContinuousMode) {
           listenLabel.textContent ='Listening...';
-          setTimeout(() => startListening(true), 300);
+          setTimeout(() => startListening(true), 200);
         } else {
           stopListeningUI();
         }
@@ -288,14 +297,14 @@ async function startListening(isAutoRestart = false) {
       } else {
         if (isContinuousMode) {
           listenLabel.textContent ='Listening...';
-          setTimeout(() => startListening(true), 300);
+          setTimeout(() => startListening(true), 200);
         } else {
           stopListeningUI();
         }
       }
     };
 
-    mediaRecorder.start(500);
+    mediaRecorder.start(200);
 
     isListening = true;
     btnListen.classList.add('active');
@@ -310,7 +319,7 @@ async function startListening(isAutoRestart = false) {
 
     if (analyser) {
       let meterTick = 0;
-      const SPEECH_THRESHOLD = usingMicFallback ? 7 : 4.5;
+      const SPEECH_THRESHOLD = usingMicFallback ? 5.5 : 3.0;
 
       maxChunkTimeout = setTimeout(() => {
         if (isListening && hasSpeechStarted) stopListening(false);
@@ -329,6 +338,9 @@ async function startListening(isAutoRestart = false) {
         if (avg >= SPEECH_THRESHOLD) {
           if (!hasSpeechStarted) {
             hasSpeechStarted = true;
+            speechStartMs = Date.now();
+            audioChunks = [...preSpeechChunks];
+            preSpeechChunks = [];
             setStatus('listening', 'Question detected - listening...');
             listenLabel.textContent = 'Recording...';
           }
