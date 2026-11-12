@@ -31,6 +31,7 @@ let audioChunks = [];
 let audioStream = null;
 let audioContext = null;
 let silenceTimeout = null;
+let idleRolloverTimeout = null;
 
 // Microphone stream used ONLY as a last-resort fallback when the
 // system audio capture fails. NEVER mixed into the normal recording
@@ -174,8 +175,9 @@ async function startListening(isAutoRestart = false) {
 
     // 2. Analyser for silence detection (optional broken audio devices
     // must never kill the capture flow)
-    const SILENCE_DURATION = 400; // stop 400ms after speech ends (ultra-fast submit)
+    const SILENCE_DURATION = 420; // stop 420ms after speech ends (fast submit)
     const MAX_CHUNK_DURATION = 15000; // hard cap per recording cycle
+    const IDLE_ROLLOVER_MS = 8000; // refresh empty buffer every 8s if no speech
 
     try {
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -203,32 +205,34 @@ async function startListening(isAutoRestart = false) {
     const recorderOptions = mimeType ? { mimeType } : {};
     mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
     audioChunks = [];
-    let preSpeechChunks = [];
-    let speechStartMs = null;
     const recordStartMs = Date.now();
 
     mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        if (!hasSpeechStarted) {
-          // Rolling pre-speech buffer: keep only last 2 slices (~400ms) to avoid sending seconds of silence
-          preSpeechChunks.push(e.data);
-          if (preSpeechChunks.length > 2) preSpeechChunks.shift();
-        } else {
-          audioChunks.push(e.data);
-        }
+      // Keep all chunks to guarantee container headers (EBML/Opus) are never corrupted
+      if (e.data && e.data.size > 0) {
+        audioChunks.push(e.data);
       }
     };
+
+    idleRolloverTimeout = setTimeout(() => {
+      if (isListening && !hasSpeechStarted) {
+        stopListening(false);
+      }
+    }, IDLE_ROLLOVER_MS);
 
     mediaRecorder.onstop = async () => {
       clearTimeout(maxChunkTimeout);
       maxChunkTimeout = null;
+      clearTimeout(idleRolloverTimeout);
+      idleRolloverTimeout = null;
       cleanupAudio();
 
-      if (audioChunks.length === 0) {
-        setStatus('ready','Listening...');
+      // If no speech was detected in this cycle, silently loop back without transcribing
+      if (!hasSpeechStarted || audioChunks.length === 0) {
+        setStatus('ready','Listening for interviewer voice...');
         if (isContinuousMode) {
           listenLabel.textContent ='Listening...';
-          setTimeout(() => startListening(true), 200);
+          setTimeout(() => startListening(true), 150);
         } else {
           stopListeningUI();
         }
@@ -238,14 +242,13 @@ async function startListening(isAutoRestart = false) {
       const actualMime = mimeType ? mimeType.split(';')[0] :'audio/webm';
       const audioBlob = new Blob(audioChunks, { type: actualMime });
 
-      // Discard very short recordings - notification clicks / brief
-      // background spikes are never real questions
-      const recordedMs = speechStartMs ? (Date.now() - speechStartMs) : (Date.now() - recordStartMs);
-      if (recordedMs < 400) {
+      // Discard very short recordings - clicks / brief glitches
+      const recordedMs = Date.now() - recordStartMs;
+      if (recordedMs < 500) {
         console.log(`Recording too short (${recordedMs}ms) - discarding`);
         if (isContinuousMode) {
           listenLabel.textContent ='Listening...';
-          setTimeout(() => startListening(true), 200);
+          setTimeout(() => startListening(true), 150);
         } else {
           stopListeningUI();
         }
@@ -304,7 +307,7 @@ async function startListening(isAutoRestart = false) {
       }
     };
 
-    mediaRecorder.start(200);
+    mediaRecorder.start(250);
 
     isListening = true;
     btnListen.classList.add('active');
@@ -338,9 +341,8 @@ async function startListening(isAutoRestart = false) {
         if (avg >= SPEECH_THRESHOLD) {
           if (!hasSpeechStarted) {
             hasSpeechStarted = true;
-            speechStartMs = Date.now();
-            audioChunks = [...preSpeechChunks];
-            preSpeechChunks = [];
+            clearTimeout(idleRolloverTimeout);
+            idleRolloverTimeout = null;
             setStatus('listening', 'Question detected - listening...');
             listenLabel.textContent = 'Recording...';
           }
@@ -378,6 +380,8 @@ function stopListening(isManual = false) {
   }
   clearTimeout(silenceTimeout);
   silenceTimeout = null;
+  clearTimeout(idleRolloverTimeout);
+  idleRolloverTimeout = null;
 
   if (mediaRecorder && mediaRecorder.state !=='inactive') {
     mediaRecorder.stop();
