@@ -91,9 +91,11 @@ function isLikelyQuestion(text) {
   if (t.length < 8) return false;                        // too short (at least 8 chars, e.g. "Why Java?")
   const words = t.split(/\s+/).filter(Boolean);
   if (words.length < 2) return false;                    // at least 2 words (e.g. "Explain Redux")
+  // Reject bracketed or parenthesized sound effects from Whisper (e.g. [ding], (bell), [music])
+  if (/^(\[|\().*(\]|\))$/i.test(t)) return false;
   const foreign = (t.match(/[^a-zA-Z0-9 .,?!'"-:;()&/$%@#+\n]/g) || []).length;
   if (foreign / t.length > 0.04) return false;           // foreign-language hallucination
-  const hallucination = /^(thank(s| you)?|thanks (for )?watching|okay+|ok|yeah|yes|no|hello+|hi+|bye+|tchau|obrigado|gracias|merci|arigato|danke|sorry|wow|umm*|hmm*|bye bye|see you|goodbye)\b/i;
+  const hallucination = /^(thank(s| you)?|thanks (for )?watching|okay+|ok|yeah|yes|no|hello+|hi+|bye+|tchau|obrigado|gracias|merci|arigato|danke|sorry|wow|umm*|hmm*|bye bye|see you|goodbye|ding|chime|beep|bell)\b/i;
   if (hallucination.test(t)) return false;               // noise/filler word picked from background
   return true;
 }
@@ -185,6 +187,7 @@ async function startListening(isAutoRestart = false) {
   let analyser = null;
   let dataArray = null;
   let hasSpeechStarted = false;
+  let speechStartMs = null;
   let usingMicFallback = false;
 
   try {
@@ -295,10 +298,11 @@ async function startListening(isAutoRestart = false) {
       const actualMime = mimeType ? mimeType.split(';')[0] :'audio/webm';
       const audioBlob = new Blob(audioChunks, { type: actualMime });
 
-      // Discard very short recordings - clicks / brief glitches
-      const recordedMs = Date.now() - recordStartMs;
-      if (recordedMs < 500) {
-        console.log(`Recording too short (${recordedMs}ms) - discarding`);
+      // Discard sound bursts shorter than 900ms (system pop-up sounds, dings, mouse clicks, notifications)
+      // Real interviewer questions take at least 900-1200ms of spoken audio
+      const speechDurationMs = speechStartMs ? (Date.now() - speechStartMs) : 0;
+      if (speechDurationMs < 900) {
+        console.log(`Audio burst too short for an interview question (${speechDurationMs}ms) - ignoring pop-up sound`);
         if (isContinuousMode) {
           listenLabel.textContent ='Listening...';
           setTimeout(() => startListening(true), 150);
@@ -334,7 +338,7 @@ async function startListening(isAutoRestart = false) {
         } else {
           stopListeningUI();
         }
-        showLoader();
+        // Do NOT call showLoader() here! Keep the existing answer visible so screen never goes blank on noise
 
         try {
           const result = await window.api.transcribeAudio(base64Audio, submitMime);
@@ -343,8 +347,8 @@ async function startListening(isAutoRestart = false) {
             currentCycleProcessed = true;
             processQuestion(transcribed);
           } else if (result.success) {
-            // No speech in this chunk keep listening
-            setStatus('listening','Listening for interview questions...');
+            // Not a question (or brief noise) - keep previous answer intact and keep listening
+            setStatus('listening','Listening for interviewer voice (system audio)...');
             loader.style.display ='none';
             if (isContinuousMode) {
               listenLabel.textContent ='Listening...';
@@ -391,7 +395,8 @@ async function startListening(isAutoRestart = false) {
 
     if (analyser) {
       let meterTick = 0;
-      const SPEECH_THRESHOLD = usingMicFallback ? 5.5 : 3.0;
+      let consecutiveVoiceFrames = 0;
+      const SPEECH_THRESHOLD = usingMicFallback ? 6.0 : 3.6;
 
       maxChunkTimeout = setTimeout(() => {
         if (isListening && hasSpeechStarted) stopListening(false);
@@ -400,27 +405,52 @@ async function startListening(isAutoRestart = false) {
       function checkSilence() {
         if (!isListening) return;
         analyser.getByteFrequencyData(dataArray);
-        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+
+        // Vocal Formant Analysis: Human voice formants (~300Hz - 3200Hz, bins 3 to 34)
+        // vs. high-frequency notification dings/pings/clicks (>3500Hz, bins 38 to 128)
+        let voiceSum = 0;
+        for (let i = 3; i <= 34; i++) voiceSum += dataArray[i];
+        const voiceAvg = voiceSum / 32;
+
+        let highSum = 0;
+        for (let i = 38; i <= 128; i++) highSum += dataArray[i];
+        const highAvg = highSum / 91;
+
+        const totalAvg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
 
         if (++meterTick % 4 === 0) {
-          meterSys.style.width = Math.min(100, avg * 3.5) + '%';
-          if (usingMicFallback) meterMic.style.width = Math.min(100, avg * 3.5) + '%';
+          meterSys.style.width = Math.min(100, totalAvg * 3.5) + '%';
+          if (usingMicFallback) meterMic.style.width = Math.min(100, totalAvg * 3.5) + '%';
         }
 
-        if (avg >= SPEECH_THRESHOLD) {
-          if (!hasSpeechStarted) {
-            hasSpeechStarted = true;
-            clearTimeout(idleRolloverTimeout);
-            idleRolloverTimeout = null;
-            setStatus('listening', 'Question detected - listening...');
-            listenLabel.textContent = 'Recording...';
+        // Voice detection criteria:
+        // 1. Adequate voice band energy (voiceAvg >= SPEECH_THRESHOLD)
+        // 2. Reject high-pitched bell chimes/pings: voice band must dominate or exceed high frequencies
+        const isVoiceFrequency = voiceAvg >= SPEECH_THRESHOLD && (voiceAvg >= highAvg * 1.1 || highAvg < 3.5);
+
+        if (isVoiceFrequency) {
+          consecutiveVoiceFrames++;
+          // Require at least 7 consecutive frames (~115ms) of sustained human vocal energy
+          // to completely ignore single-spike pop-up sounds, clicks, and alert dings
+          if (consecutiveVoiceFrames >= 7) {
+            if (!hasSpeechStarted) {
+              hasSpeechStarted = true;
+              speechStartMs = Date.now();
+              clearTimeout(idleRolloverTimeout);
+              idleRolloverTimeout = null;
+              setStatus('listening', 'Question detected - listening...');
+              listenLabel.textContent = 'Recording...';
+            }
+            clearTimeout(silenceTimeout);
+            silenceTimeout = null;
           }
-          clearTimeout(silenceTimeout);
-          silenceTimeout = null;
-        } else if (hasSpeechStarted && !silenceTimeout) {
-          silenceTimeout = setTimeout(() => {
-            if (isListening) stopListening(false);
-          }, SILENCE_DURATION);
+        } else {
+          consecutiveVoiceFrames = Math.max(0, consecutiveVoiceFrames - 2);
+          if (hasSpeechStarted && !silenceTimeout) {
+            silenceTimeout = setTimeout(() => {
+              if (isListening) stopListening(false);
+            }, SILENCE_DURATION);
+          }
         }
 
         requestAnimationFrame(checkSilence);
