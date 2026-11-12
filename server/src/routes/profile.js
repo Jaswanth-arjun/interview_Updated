@@ -1,6 +1,7 @@
-﻿// â”€â”€â”€ Profile Setup Routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ Profile Setup Routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { getMemoryProfile, setMemoryProfile } = require('../services/authService');
 
 const router = express.Router();
 const prisma = require('../db/prisma');
@@ -11,9 +12,17 @@ const prisma = require('../db/prisma');
  */
 router.get('/setup', requireAuth, async (req, res, next) => {
   try {
-    const profile = await prisma.profileData.findUnique({
-      where: { userId: req.user.id }
-    });
+    let profile = null;
+    try {
+      profile = await prisma.profileData.findUnique({
+        where: { userId: req.user.id }
+      });
+    } catch (e) {
+      profile = getMemoryProfile(req.user.id);
+    }
+    if (!profile) {
+      profile = getMemoryProfile(req.user.id);
+    }
     res.json({ success: true, profile: profile || {} });
   } catch (err) {
     next(err);
@@ -27,27 +36,52 @@ router.get('/setup', requireAuth, async (req, res, next) => {
 router.post('/setup', requireAuth, async (req, res, next) => {
   try {
     const { resumeText, companyName, roleName, jobDescription, projects, extraNotes } = req.body;
-
-    const profile = await prisma.profileData.upsert({
-      where: { userId: req.user.id },
-      create: {
+    let profile = null;
+    try {
+      profile = await prisma.profileData.upsert({
+        where: { userId: req.user.id },
+        create: {
+          userId: req.user.id,
+          resumeText,
+          companyName,
+          roleName,
+          jobDescription,
+          projects,
+          extraNotes
+        },
+        update: {
+          resumeText,
+          companyName,
+          roleName,
+          jobDescription,
+          projects,
+          extraNotes
+        }
+      });
+    } catch (err) {
+      profile = setMemoryProfile(req.user.id, {
         userId: req.user.id,
         resumeText,
         companyName,
         roleName,
         jobDescription,
         projects,
-        extraNotes
-      },
-      update: {
+        extraNotes,
+        updatedAt: new Date()
+      });
+    }
+    if (!profile) {
+      profile = setMemoryProfile(req.user.id, {
+        userId: req.user.id,
         resumeText,
         companyName,
         roleName,
         jobDescription,
         projects,
-        extraNotes
-      }
-    });
+        extraNotes,
+        updatedAt: new Date()
+      });
+    }
 
     res.json({ success: true, profile });
   } catch (err) {

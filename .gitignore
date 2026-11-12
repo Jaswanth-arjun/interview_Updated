@@ -6,5 +6,7 @@ out/
 landing_backup/
 service-test/
 .vscode/
+*.db
+
 
 

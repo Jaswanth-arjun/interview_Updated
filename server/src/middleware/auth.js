@@ -1,4 +1,4 @@
-﻿// â”€â”€â”€ JWT Authentication Middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ JWT Authentication Middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const { AuthError, ForbiddenError } = require('../utils/errors');
@@ -33,24 +33,34 @@ async function requireAuth(req, res, next) {
       throw new AuthError('Invalid access token');
     }
 
-    // Fetch user from DB
-    const user = await prisma.user.findUnique({
-      where: { id: payload.userId },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        tier: true,
-        walletBalancePaise: true,
-        freeTrialRequests: true,
-        freeTrialUsed: true,
-        deviceFingerprint: true,
-        isBlocked: true,
-        isAdmin: true,
-        avatarUrl: true,
-        createdAt: true,
-      },
-    });
+    // Fetch user from DB (with fallback to memory session)
+    let user = null;
+    try {
+      user = await prisma.user.findUnique({
+        where: { id: payload.userId },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          tier: true,
+          walletBalancePaise: true,
+          freeTrialRequests: true,
+          freeTrialUsed: true,
+          deviceFingerprint: true,
+          isBlocked: true,
+          isAdmin: true,
+          avatarUrl: true,
+          createdAt: true,
+        },
+      });
+    } catch (dbErr) {
+      logger.warn(`Database unreachable in requireAuth (${dbErr.message}). Checking memory fallback.`);
+    }
+
+    if (!user) {
+      const { getMemoryUser } = require('../services/authService');
+      user = getMemoryUser(payload.userId);
+    }
 
     if (!user) {
       throw new AuthError('User account not found');
@@ -65,7 +75,7 @@ async function requireAuth(req, res, next) {
     if (isUserAdmin) {
       user.isAdmin = true;
       user.tier = 'pro';
-      user.walletBalancePaise = 99999999; // Represents â‚¹999,999.99
+      user.walletBalancePaise = 99999999;
     } else {
       user.tier = user.walletBalancePaise > 0 ? 'pro' : 'free';
     }
@@ -79,7 +89,7 @@ async function requireAuth(req, res, next) {
 }
 
 /**
- * Optional auth â€” attaches req.user if token is valid, otherwise continues.
+ * Optional auth — attaches req.user if token is valid, otherwise continues.
  */
 async function optionalAuth(req, res, next) {
   try {
@@ -92,9 +102,20 @@ async function optionalAuth(req, res, next) {
     const token = authHeader.split(' ')[1];
     try {
       const payload = jwt.verify(token, config.jwt.accessSecret);
-      const user = await prisma.user.findUnique({
-        where: { id: payload.userId },
-      });
+      let user = null;
+      try {
+        user = await prisma.user.findUnique({
+          where: { id: payload.userId },
+        });
+      } catch (dbErr) {
+        logger.warn(`Database unreachable in optionalAuth (${dbErr.message}). Checking memory fallback.`);
+      }
+
+      if (!user) {
+        const { getMemoryUser } = require('../services/authService');
+        user = getMemoryUser(payload.userId);
+      }
+
       req.user = user && !user.isBlocked ? user : null;
 
       if (req.user) {

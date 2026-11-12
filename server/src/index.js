@@ -94,7 +94,7 @@ app.use((err, req, res, next) => {
 
   res.status(statusCode).json({
     success: false,
-    error: isOperational ? err.message : 'A server error occurred. Please try again.',
+    error: isOperational ? err.message : (config.isDev ? (err.message || 'A server error occurred. Please try again.') : 'A server error occurred. Please try again.'),
     code: err.code || 'INTERNAL_ERROR'
   });
 });

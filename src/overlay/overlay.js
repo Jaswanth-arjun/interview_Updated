@@ -174,8 +174,8 @@ async function startListening(isAutoRestart = false) {
 
     // 2. Analyser for silence detection (optional broken audio devices
     // must never kill the capture flow)
-    const SILENCE_DURATION = 1200; // stop 1.2s after speech ends (fast submit)
-    const MAX_CHUNK_DURATION = 20000; // hard cap per recording cycle
+    const SILENCE_DURATION = 650; // stop 650ms after speech ends (fast submit)
+    const MAX_CHUNK_DURATION = 15000; // hard cap per recording cycle
     const CALIBRATION_MS = 1200; // measure ambient noise for 1.2s at start
 
     try {
@@ -232,7 +232,7 @@ async function startListening(isAutoRestart = false) {
       // Discard very short recordings - notification clicks / brief
       // background spikes are never real questions
       const recordedMs = Date.now() - recordStartMs;
-      if (recordedMs < 1500) {
+      if (recordedMs < 600) {
         console.log(`Recording too short (${recordedMs}ms) - discarding`);
         if (isContinuousMode) {
           listenLabel.textContent ='Listening...';
@@ -309,11 +309,8 @@ async function startListening(isAutoRestart = false) {
     let maxChunkTimeout = null;
 
     if (analyser) {
-      // Adaptive noise-floor silence detection on the recorded stream
       let meterTick = 0;
-      const baselineSamples = [];
-      const listenStart = Date.now();
-      let dynamicThreshold = 6;
+      const SPEECH_THRESHOLD = usingMicFallback ? 7 : 4.5;
 
       maxChunkTimeout = setTimeout(() => {
         if (isListening && hasSpeechStarted) stopListening(false);
@@ -324,24 +321,16 @@ async function startListening(isAutoRestart = false) {
         analyser.getByteFrequencyData(dataArray);
         const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
 
-        if (!hasSpeechStarted && Date.now() - listenStart < CALIBRATION_MS) {
-          baselineSamples.push(avg);
-        } else if (baselineSamples.length > 0) {
-          const baseline = baselineSamples.reduce((a, b) => a + b, 0) / baselineSamples.length;
-          dynamicThreshold = Math.max(5, baseline * 2.5);
-          baselineSamples.length = 0;
+        if (++meterTick % 4 === 0) {
+          meterSys.style.width = Math.min(100, avg * 3.5) + '%';
+          if (usingMicFallback) meterMic.style.width = Math.min(100, avg * 3.5) + '%';
         }
 
-        if (++meterTick % 6 === 0) {
-          meterSys.style.width = Math.min(100, avg * 3) +'%';
-          if (usingMicFallback) meterMic.style.width = Math.min(100, avg * 3) +'%';
-        }
-
-        if (avg > dynamicThreshold) {
+        if (avg >= SPEECH_THRESHOLD) {
           if (!hasSpeechStarted) {
             hasSpeechStarted = true;
-            setStatus('listening','Question detected - listening...');
-            listenLabel.textContent ='Recording...';
+            setStatus('listening', 'Question detected - listening...');
+            listenLabel.textContent = 'Recording...';
           }
           clearTimeout(silenceTimeout);
           silenceTimeout = null;

@@ -1,4 +1,4 @@
-﻿// â”€â”€â”€ Wallet Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ Wallet Service â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const { InsufficientBalanceError, ValidationError } = require('../utils/errors');
 const logger = require('../utils/logger');
 const config = require('../config');
@@ -9,16 +9,32 @@ const prisma = require('../db/prisma');
  * Get wallet balance for a user.
  */
 async function getBalance(userId) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      walletBalancePaise: true,
-      tier: true,
-      freeTrialRequests: true,
-      freeTrialUsed: true,
-    },
-  });
-  return user;
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        walletBalancePaise: true,
+        tier: true,
+        freeTrialRequests: true,
+        freeTrialUsed: true,
+      },
+    });
+    if (user) return user;
+  } catch (err) {
+    logger.warn(`getBalance DB query failed (${err.message}). Checking memory fallback.`);
+  }
+
+  const { getMemoryUser } = require('./authService');
+  const memUser = getMemoryUser(userId);
+  if (memUser) {
+    return {
+      walletBalancePaise: memUser.walletBalancePaise,
+      tier: memUser.tier,
+      freeTrialRequests: memUser.freeTrialRequests,
+      freeTrialUsed: memUser.freeTrialUsed,
+    };
+  }
+  return null;
 }
 
 /**
@@ -26,18 +42,28 @@ async function getBalance(userId) {
  * Returns { allowed, isTrial, costPaise, reason }
  */
 async function checkQuota(userId, requestType) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      email: true,
-      tier: true,
-      walletBalancePaise: true,
-      freeTrialRequests: true,
-      freeTrialUsed: true,
-      isBlocked: true,
-      isAdmin: true,
-    },
-  });
+  let user = null;
+  try {
+    user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        email: true,
+        tier: true,
+        walletBalancePaise: true,
+        freeTrialRequests: true,
+        freeTrialUsed: true,
+        isBlocked: true,
+        isAdmin: true,
+      },
+    });
+  } catch (err) {
+    logger.warn(`checkQuota DB query failed (${err.message}). Checking memory fallback.`);
+  }
+
+  if (!user) {
+    const { getMemoryUser } = require('./authService');
+    user = getMemoryUser(userId);
+  }
 
   if (!user) {
     return { allowed: false, reason: 'User not found' };
@@ -64,7 +90,7 @@ async function checkQuota(userId, requestType) {
 
   return {
     allowed: false,
-    reason: `Insufficient wallet balance (â‚¹${(user.walletBalancePaise / 100).toFixed(2)} remaining). Please recharge.`,
+    reason: `Insufficient wallet balance (₹${(user.walletBalancePaise / 100).toFixed(2)} remaining). Please recharge.`,
   };
 }
 
@@ -72,39 +98,71 @@ async function checkQuota(userId, requestType) {
  * Deduct credits from user wallet after a successful AI request.
  */
 async function deductCredits(userId, costPaise, isTrial = false) {
-  if (isTrial) {
-    // Increment trial usage counter
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        freeTrialUsed: { increment: 1 },
-      },
-    });
-    logger.debug(`Trial request consumed for user ${userId}`);
+  try {
+    const { getMemoryUser, setMemoryUser } = require('./authService');
+    const memUser = getMemoryUser(userId);
+    if (memUser && (memUser.isAdmin || config.adminEmails.includes(memUser.email))) {
+      return; // Admins have unlimited free access
+    }
+
+    if (isTrial) {
+      try {
+        await prisma.user.update({
+          where: { id: userId },
+          data: {
+            freeTrialUsed: { increment: 1 },
+          },
+        });
+      } catch {}
+      if (memUser) {
+        memUser.freeTrialUsed = (memUser.freeTrialUsed || 0) + 1;
+        setMemoryUser(userId, memUser);
+      }
+      logger.debug(`Trial request consumed for user ${userId}`);
+      return;
+    }
+
+    if (costPaise <= 0) return;
+
+    let user = null;
+    try {
+      user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { walletBalancePaise: true, isAdmin: true, email: true },
+      });
+    } catch {}
+
+    if (!user) user = memUser;
+
+    if (user && (user.isAdmin || config.adminEmails.includes(user.email))) {
+      return; // Admin bypass
+    }
+
+    if (!user || (user.walletBalancePaise || 0) < costPaise) {
+      throw new InsufficientBalanceError();
+    }
+
+    try {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          walletBalancePaise: { decrement: costPaise },
+          tier: 'pro',
+        },
+      });
+    } catch {}
+
+    if (memUser) {
+      memUser.walletBalancePaise = Math.max(0, (memUser.walletBalancePaise || 0) - costPaise);
+      setMemoryUser(userId, memUser);
+    }
+
+    logger.debug(`Deducted ₹${(costPaise / 100).toFixed(2)} from user ${userId}`);
     return;
+  } catch (err) {
+    if (err instanceof InsufficientBalanceError) throw err;
+    logger.warn(`deductCredits warning: ${err.message}`);
   }
-
-  if (costPaise <= 0) return;
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { walletBalancePaise: true },
-  });
-
-  if (!user || user.walletBalancePaise < costPaise) {
-    throw new InsufficientBalanceError();
-  }
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      walletBalancePaise: { decrement: costPaise },
-      // Auto-upgrade tier to 'pro' when user has paid balance
-      tier: 'pro',
-    },
-  });
-
-  logger.debug(`Deducted â‚¹${(costPaise / 100).toFixed(2)} from user ${userId}`);
 }
 
 /**

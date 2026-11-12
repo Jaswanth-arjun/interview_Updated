@@ -201,6 +201,8 @@ html, body {
   line-height: 1.7;
   color: var(--text);
   user-select: text;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ─── Loader ───────────────────────────────────────────────── */

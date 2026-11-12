@@ -1,4 +1,4 @@
-﻿// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ AI Pipeline & Model Router Service Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ AI Pipeline & Model Router Service Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const config = require('../config');
 const meterService = require('./meterService');
@@ -16,7 +16,34 @@ function getNextGeminiKey() {
 }
 
 // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Resilient Fetch helper Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-async function fetchWithRetry(url, options = {}, { retries = 2, timeoutMs = 15000, retryDelayMs = 1000 } = {}) {
+// ─── Provider Health Tracker ─────────────────────────────────────
+// Automatically skips dead local proxies or invalid keys to prevent wasting 5-70s on failed retries
+let groqDisabledUntil = 0;
+let omniRouteDisabledUntil = 0;
+
+function isGroqAvailable() {
+  return !!config.ai.groqKey && Date.now() > groqDisabledUntil;
+}
+
+function isOmniRouteAvailable() {
+  return !!config.ai.omniRoute.apiKey && Date.now() > omniRouteDisabledUntil;
+}
+
+function markGroqFailed(statusCode) {
+  if (statusCode === 401 || statusCode === 403) {
+    logger.warn(`⚠️ Groq API key rejected (HTTP ${statusCode}). Temporarily bypassing Groq to route instantly to Gemini.`);
+    groqDisabledUntil = Date.now() + 5 * 60 * 1000;
+  }
+}
+
+function markOmniRouteFailed(isConnRefused = false) {
+  if (isConnRefused) {
+    logger.warn('⚠️ OmniRoute local proxy is offline. Temporarily bypassing OmniRoute to route instantly to Gemini.');
+    omniRouteDisabledUntil = Date.now() + 10 * 60 * 1000;
+  }
+}
+
+async function fetchWithRetry(url, options = {}, { retries = 1, timeoutMs = 6000, retryDelayMs = 400 } = {}) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -26,10 +53,12 @@ async function fetchWithRetry(url, options = {}, { retries = 2, timeoutMs = 1500
       return response;
     } catch (err) {
       clearTimeout(timer);
+      const isRefused = err.cause?.code === 'ECONNREFUSED' || err.code === 'ECONNREFUSED' || (err.message && err.message.includes('ECONNREFUSED'));
+      if (isRefused) throw err; // Never retry an offline port!
       const isLastAttempt = attempt === retries;
       const isNetworkError = err.name === 'AbortError' || err.message?.includes('fetch failed') || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT';
       if (isLastAttempt || !isNetworkError) throw err;
-      logger.warn(`Ã¢Å¸Â³ Network error on attempt ${attempt + 1}/${retries + 1}, retrying in ${retryDelayMs}ms...`);
+      logger.warn(`⟳ Network error on attempt ${attempt + 1}/${retries + 1}, retrying in ${retryDelayMs}ms...`);
       await new Promise(r => setTimeout(r, retryDelayMs));
     }
   }
@@ -147,9 +176,9 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
   const audioDurationMs = Math.round((sizeBytes / 16000) * 1000);
 
   // 1. Groq Whisper first (ultra-fast transcription for all tiers)
-  if (config.ai.groqKey) {
+  if (isGroqAvailable()) {
     try {
-      logger.info(`âš¡ Transcribing via Groq Whisper...`);
+      logger.info(`⚡ Transcribing via Groq Whisper...`);
       const response = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${config.ai.groqKey}` },
@@ -176,6 +205,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
 
         return { success: true, text: isLikelyQuestion(cleaned) ? cleaned : '' };
       }
+      markGroqFailed(response.status);
       errors.push(`Groq Whisper HTTP ${response.status}`);
     } catch (e) {
       logger.warn(`Groq Whisper failed: ${e.message}`);
@@ -184,9 +214,9 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
   }
 
   // 2. OmniRoute Whisper Fallback
-  if (config.ai.omniRoute.apiKey) {
+  if (isOmniRouteAvailable()) {
     try {
-      logger.info(`âš¡ Fallback: Transcribing via OmniRoute...`);
+      logger.info(`⚡ Fallback: Transcribing via OmniRoute...`);
       const response = await fetchWithRetry(`${config.ai.omniRoute.baseUrl}/audio/transcriptions`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${config.ai.omniRoute.apiKey}` },
@@ -215,6 +245,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
       }
       errors.push(`OmniRoute Whisper HTTP ${response.status}`);
     } catch (e) {
+      markOmniRouteFailed(e.cause?.code === 'ECONNREFUSED' || e.code === 'ECONNREFUSED' || (e.message && e.message.includes('fetch failed')));
       logger.warn(`OmniRoute Whisper failed: ${e.message}`);
       errors.push(`OmniRoute: ${e.message}`);
     }
@@ -314,18 +345,21 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
 
 // Helper to construct prompt template
 function buildInterviewPrompt(question, d) {
-  return `You are a real candidate sitting in a live job interview. The interviewer just asked you: "${question}"
+  return `You are an expert, highly skilled candidate answering an interview question in a live technical/behavioral job interview for the role of "${d.roleName || 'Software Engineer'}" at "${d.companyName || 'the target company'}".
 
-HOW TO ANSWER (very important):
-- Talk EXACTLY like a real person speaking out loud â€” natural, confident, relaxed. NOT like a textbook, NOT like an AI.
-- Use SIMPLE everyday words. Explain it like you're telling a friend who is smart but new to the topic.
-- Keep it SHORT: 2-4 sentences you can say in ONE breath (~20-30 seconds of talking).
-- Flow: give the direct answer first, then one small reason or quick real-life example, then STOP. Don't drag it.
-- Sound human â€” natural phrases like "Basically...", "So...", "For example...", "In my experience..." are fine. But never sound scripted or memorized.
-- NEVER use bullet points, markdown, lists, headings, or emojis â€” spoken answer only, plain sentences.
-- NEVER say you are an AI, assistant, or language model â€” you ARE the candidate.
-- TECHNICAL questions: explain in your own simple words with a quick real-world example. Do NOT dump textbook definitions. Don't mention resume/projects unless it's about your experience.
-- RESUME/PROJECT questions: use ONLY facts from the candidate context below. Never invent details.
+INTERVIEWER'S QUESTION:
+"${question}"
+
+YOUR INSTRUCTIONS:
+- Deliver a COMPLETE, IN-DEPTH, PROFESSIONAL, and WINNING interview response. Do NOT give a 1-word or 1-sentence answer. Provide a thorough, well-rounded interview-level answer that demonstrates strong expertise and practical experience.
+- Structure your answer clearly into logical parts:
+  1. Direct Definition & Core Answer: Start with a clear, authoritative explanation of the concept or direct answer to the question.
+  2. Technical Architecture & How It Works: Explain the underlying mechanics, components, trade-offs, and why this approach is chosen.
+  3. Practical Real-World Experience: Give a concrete real-world scenario or project implementation example (referencing relevant details from the candidate context below).
+  4. Best Practices & Key Takeaways: Conclude with key performance tips, pitfalls to avoid, or architectural best practices.
+- Tone: Confident, articulate, professional, and natural.
+- Format: Clear spoken paragraphs. You may use short bullet points when listing key features or trade-offs so it is easy to read and deliver out loud.
+- NEVER say you are an AI, virtual assistant, or language model. You ARE the candidate.
 
 CANDIDATE CONTEXT:
 Role: ${d.roleName || 'N/A'} at ${d.companyName || 'N/A'}
@@ -334,7 +368,7 @@ Resume: ${d.resumeText || 'N/A'}
 Projects: ${d.projects || 'N/A'}
 Notes: ${d.extraNotes || 'N/A'}
 
-Now speak your answer (plain spoken sentences only, nothing else):`;
+Provide your complete, comprehensive interview answer now:`;
 }
 
 /**
@@ -362,9 +396,9 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
   };
 
   // 1. Groq generation first (ultra-fast answer streaming)
-  if (config.ai.groqKey) {
+  if (isGroqAvailable()) {
     try {
-      logger.info(`âš¡ Generating answer via Groq...`);
+      logger.info(`⚡ Generating answer via Groq...`);
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -374,7 +408,8 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
         body: JSON.stringify({
           model: 'openai/gpt-oss-20b',
           messages: [{ role: 'user', content: prompt }],
-          stream: true
+          stream: true,
+          max_tokens: 1200
         })
       });
 
@@ -407,6 +442,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
         modelUsed = 'openai/gpt-oss-20b';
         costPaise = config.pricing.generateGroq;
       } else {
+        markGroqFailed(response.status);
         errors.push(`Groq HTTP ${response.status}`);
       }
     } catch (e) {
@@ -416,9 +452,9 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
   }
 
   // 2. OmniRoute fallback
-  if (!providerUsed && config.ai.omniRoute.apiKey) {
+  if (!providerUsed && isOmniRouteAvailable()) {
     try {
-      logger.info(`âš¡ Fallback: Generating answer via OmniRoute...`);
+      logger.info(`⚡ Fallback: Generating answer via OmniRoute...`);
       const response = await fetch(`${config.ai.omniRoute.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -428,7 +464,8 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
         body: JSON.stringify({
           model: config.ai.omniRoute.model,
           messages: [{ role: 'user', content: prompt }],
-          stream: true
+          stream: true,
+          max_tokens: 1200
         })
       });
 
@@ -464,6 +501,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
         errors.push(`OmniRoute HTTP ${response.status}`);
       }
     } catch (e) {
+      markOmniRouteFailed(e.cause?.code === 'ECONNREFUSED' || e.code === 'ECONNREFUSED' || (e.message && e.message.includes('fetch failed')));
       logger.warn(`OmniRoute generation failed: ${e.message}`);
       errors.push(`OmniRoute: ${e.message}`);
     }
@@ -479,7 +517,13 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
         logger.info(`Generating answer via Gemini key #${activeKey.index}...`);
         const genAI = new GoogleGenerativeAI(activeKey.key);
         const modelName = 'gemini-3.6-flash';
-        const model = genAI.getGenerativeModel({ model: modelName });
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            maxOutputTokens: 1200,
+            temperature: 0.65,
+          }
+        });
         const resultStream = await model.generateContentStream(prompt);
 
         for await (const chunk of resultStream.stream) {
@@ -706,7 +750,7 @@ async function generateChatStream(userId, question, context, res, isTrial, isSlo
   const messages = [{ role: 'user', content: prompt }];
 
   // 1. Groq (fast)
-  if (config.ai.groqKey) {
+  if (isGroqAvailable()) {
     try {
       const model = isSlow ? 'openai/gpt-oss-120b' : 'openai/gpt-oss-20b';
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -715,13 +759,14 @@ async function generateChatStream(userId, question, context, res, isTrial, isSlo
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${config.ai.groqKey}`
         },
-        body: JSON.stringify({ model, messages, stream: true })
+        body: JSON.stringify({ model, messages, stream: true, max_tokens: 1200 })
       });
       if (response.ok) {
         await consumeOpenAIStream(response, sendChunk);
         providerUsed = 'groq';
         modelUsed = model;
       } else {
+        markGroqFailed(response.status);
         errors.push(`Groq HTTP ${response.status}`);
       }
     } catch (e) {
@@ -730,7 +775,7 @@ async function generateChatStream(userId, question, context, res, isTrial, isSlo
   }
 
   // 2. OmniRoute fallback
-  if (!providerUsed && config.ai.omniRoute.apiKey) {
+  if (!providerUsed && isOmniRouteAvailable()) {
     try {
       const response = await fetch(`${config.ai.omniRoute.baseUrl}/chat/completions`, {
         method: 'POST',
@@ -738,7 +783,7 @@ async function generateChatStream(userId, question, context, res, isTrial, isSlo
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${config.ai.omniRoute.apiKey}`
         },
-        body: JSON.stringify({ model: config.ai.omniRoute.model, messages, stream: true })
+        body: JSON.stringify({ model: config.ai.omniRoute.model, messages, stream: true, max_tokens: 1200 })
       });
       if (response.ok) {
         await consumeOpenAIStream(response, sendChunk);
@@ -748,6 +793,7 @@ async function generateChatStream(userId, question, context, res, isTrial, isSlo
         errors.push(`OmniRoute HTTP ${response.status}`);
       }
     } catch (e) {
+      markOmniRouteFailed(e.cause?.code === 'ECONNREFUSED' || e.code === 'ECONNREFUSED' || (e.message && e.message.includes('fetch failed')));
       errors.push(`OmniRoute: ${e.message}`);
     }
   }
@@ -759,7 +805,13 @@ async function generateChatStream(userId, question, context, res, isTrial, isSlo
       if (!activeKey) continue;
       try {
         const genAI = new GoogleGenerativeAI(activeKey.key);
-        const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+        const model = genAI.getGenerativeModel({
+          model: 'gemini-3.6-flash',
+          generationConfig: {
+            maxOutputTokens: 1200,
+            temperature: 0.65
+          }
+        });
         const resultStream = await model.generateContentStream(prompt);
         for await (const chunk of resultStream.stream) {
           const text = chunk.text();

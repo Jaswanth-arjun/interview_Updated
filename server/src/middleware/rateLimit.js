@@ -4,9 +4,10 @@ const rateLimit = require('express-rate-limit');
 // General API rate limit
 const apiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 60,
+  max: 180, // generous headroom for frequent desktop polling & transcription
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => process.env.NODE_ENV === 'development' || req.ip === '127.0.0.1' || req.ip === '::1',
   message: {
     success: false,
     error: 'Too many requests. Please slow down.',
@@ -17,7 +18,7 @@ const apiLimiter = rateLimit({
 // Auth endpoints rate limit (stricter)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 25, // allow legitimate retries (cold starts, transient DB errors can burn attempts fast)
+  max: 30, // allow legitimate retries (cold starts, transient DB errors can burn attempts fast)
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -30,9 +31,10 @@ const authLimiter = rateLimit({
 // AI endpoints rate limit
 const aiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 20,
+  max: 120, // allow rapid audio transcription cycles during continuous listening
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => process.env.NODE_ENV === 'development' || req.ip === '127.0.0.1' || req.ip === '::1',
   message: {
     success: false,
     error: 'AI request rate limit exceeded. Please wait a moment.',
