@@ -109,6 +109,59 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+// ─── WAV Encoding Helpers (16kHz 16-bit Mono PCM for zero-error transcription) ───
+function writeWavString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
+function encodeWAV(samples, sampleRate = 16000) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  writeWavString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeWavString(view, 8, 'WAVE');
+  writeWavString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, 1, true); // Mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // 16 bits per sample
+  writeWavString(view, 36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return buffer;
+}
+
+function downsampleBuffer(buffer, sampleRate, outSampleRate = 16000) {
+  if (outSampleRate === sampleRate) return buffer;
+  const ratio = sampleRate / outSampleRate;
+  const newLength = Math.round(buffer.length / ratio);
+  const result = new Float32Array(newLength);
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+    let accum = 0, count = 0;
+    for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+      accum += buffer[i];
+      count++;
+    }
+    result[offsetResult] = count > 0 ? accum / count : 0;
+    offsetResult++;
+    offsetBuffer = nextOffsetBuffer;
+  }
+  return result;
+}
+
 // Microphone Init Helper 
 async function initMic() {
   try {
@@ -257,7 +310,23 @@ async function startListening(isAutoRestart = false) {
 
       if (audioBlob.size >= 200) {
         const arrayBuffer = await audioBlob.arrayBuffer();
-        const base64Audio = arrayBufferToBase64(arrayBuffer);
+        let base64Audio;
+        let submitMime = 'audio/wav';
+
+        try {
+          // Decode browser audio into raw PCM and export as standard 16kHz mono WAV for 100% reliable transcription
+          const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const decoded = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+          const pcm = decoded.getChannelData(0);
+          const downsampled = downsampleBuffer(pcm, decoded.sampleRate, 16000);
+          const wavBuffer = encodeWAV(downsampled, 16000);
+          base64Audio = arrayBufferToBase64(wavBuffer);
+          tempCtx.close().catch(() => {});
+        } catch (convErr) {
+          console.warn('WAV conversion fallback to webm:', convErr);
+          base64Audio = arrayBufferToBase64(arrayBuffer);
+          submitMime = actualMime;
+        }
 
         setStatus('thinking','Transcribing question...');
         if (isContinuousMode) {
@@ -268,7 +337,7 @@ async function startListening(isAutoRestart = false) {
         showLoader();
 
         try {
-          const result = await window.api.transcribeAudio(base64Audio, actualMime);
+          const result = await window.api.transcribeAudio(base64Audio, submitMime);
           const transcribed = (result.success && result.text) ? result.text.trim() : '';
           if (transcribed && isLikelyQuestion(transcribed)) {
             currentCycleProcessed = true;

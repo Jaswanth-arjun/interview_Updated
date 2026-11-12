@@ -22,28 +22,21 @@ const linkedinManager = require('./linkedin-manager');
 const REMOTE_BACKEND_URL = 'https://interview-updated.onrender.com';
 const LOCAL_BACKEND_URL = 'http://localhost:4000';
 
-let cachedBackendUrl = null;
-
 async function getBackendUrl() {
   if (process.env.BACKEND_URL) return process.env.BACKEND_URL;
-  if (cachedBackendUrl) return cachedBackendUrl;
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 600);
+    const timeoutId = setTimeout(() => controller.abort(), 800);
     const res = await fetch(`${LOCAL_BACKEND_URL}/health`, { signal: controller.signal });
     clearTimeout(timeoutId);
     if (res.ok) {
-      console.log('✓ Connected to local backend server (http://localhost:4000)');
-      cachedBackendUrl = LOCAL_BACKEND_URL;
       return LOCAL_BACKEND_URL;
     }
   } catch (e) {
     // Local server not running
   }
 
-  console.log('✓ Using remote backend server (https://interview-updated.onrender.com)');
-  cachedBackendUrl = REMOTE_BACKEND_URL;
   return REMOTE_BACKEND_URL;
 }
 
