@@ -184,6 +184,7 @@ html, body {
 .answer-box {
   flex: 1;
   overflow-y: auto;
+  overflow-anchor: none;
   margin-bottom: 0;
 }
 .answer-box::-webkit-scrollbar { width: 4px; }

@@ -21,23 +21,31 @@ const { applyFullStealth, removeFullStealth } = require('./screen-protect');
 const linkedinManager = require('./linkedin-manager');
 const REMOTE_BACKEND_URL = 'https://interview-updated.onrender.com';
 const LOCAL_BACKEND_URL = 'http://localhost:4000';
+let cachedBackendUrl = null;
+let backendCachedAt = 0;
 
 async function getBackendUrl() {
   if (process.env.BACKEND_URL) return process.env.BACKEND_URL;
+  if (cachedBackendUrl && Date.now() - backendCachedAt < 30000) return cachedBackendUrl;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 800);
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 800);
     const res = await fetch(`${LOCAL_BACKEND_URL}/health`, { signal: controller.signal });
-    clearTimeout(timeoutId);
     if (res.ok) {
-      return LOCAL_BACKEND_URL;
+      cachedBackendUrl = LOCAL_BACKEND_URL;
+      backendCachedAt = Date.now();
+      return cachedBackendUrl;
     }
   } catch (e) {
     // Local server not running
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  return REMOTE_BACKEND_URL;
+  cachedBackendUrl = REMOTE_BACKEND_URL;
+  backendCachedAt = Date.now();
+  return cachedBackendUrl;
 }
 
 const sessionPath = path.join(app.getPath('userData'), 'session-auth.json');
@@ -57,6 +65,13 @@ let sessionData = {
   user: null,
   isDemo: false
 };
+
+const PROFILE_FIELDS = ['resumeText', 'companyName', 'roleName', 'jobDescription', 'projects', 'extraNotes'];
+let candidateProfile = {};
+
+function pickProfileData(data = {}) {
+  return Object.fromEntries(PROFILE_FIELDS.map((field) => [field, typeof data[field] === 'string' ? data[field].trim() : '']));
+}
 
 // ─── Session Management ──────────────────────────────────────────
 function loadSession() {
@@ -78,6 +93,7 @@ function saveSession(data) {
       user: data.user || null,
       isDemo: false
     };
+    candidateProfile = {};
   }
   try {
     fs.writeFileSync(sessionPath, JSON.stringify(sessionData, null, 2));
@@ -93,6 +109,7 @@ function clearSession() {
     user: null,
     isDemo: false
   };
+  candidateProfile = {};
   try {
     if (fs.existsSync(sessionPath)) {
       fs.unlinkSync(sessionPath);
@@ -213,6 +230,7 @@ async function apiFetch(endpoint, options = {}) {
     if (baseUrl === LOCAL_BACKEND_URL) {
       console.warn('Local backend request failed, falling back to remote backend...');
       cachedBackendUrl = REMOTE_BACKEND_URL;
+      backendCachedAt = Date.now();
       baseUrl = REMOTE_BACKEND_URL;
       url = `${baseUrl}${endpoint}`;
       return await fetch(url, options);
@@ -578,6 +596,7 @@ function registerIPC() {
       user: { email: 'Demo Mode', name: 'Demo Candidate', tier: 'demo' },
       isDemo: true
     };
+    candidateProfile = {};
     saveSession();
     return { success: true };
   });
@@ -619,26 +638,33 @@ function registerIPC() {
 
   // Profile data
   ipcMain.handle('save-setup-data', async (_e, data) => {
-    if (sessionData.isDemo) return { success: true };
+    const profile = pickProfileData(data);
+    if (sessionData.isDemo) {
+      candidateProfile = profile;
+      return { success: true, profile: { ...candidateProfile } };
+    }
     try {
       const response = await apiFetch('/profile/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        body: JSON.stringify(profile)
       });
-      return await response.json();
+      const result = await response.json();
+      if (result.success) candidateProfile = pickProfileData(result.profile || profile);
+      return result;
     } catch (e) {
       return { success: false, error: e.message };
     }
   });
 
   ipcMain.handle('get-setup-data', async () => {
-    if (sessionData.isDemo) return {};
+    if (sessionData.isDemo) return { ...candidateProfile };
     try {
       const response = await apiFetch('/profile/setup');
       if (response.ok) {
         const data = await response.json();
-        return data.profile || {};
+        candidateProfile = pickProfileData(data.profile || {});
+        return { ...candidateProfile };
       }
       return {};
     } catch {
@@ -763,12 +789,12 @@ function registerIPC() {
   });
 
   // AI Pipeline Execution
-  ipcMain.handle('transcribe-audio', async (_e, base64Audio, mimeType) => {
+  ipcMain.handle('transcribe-audio', async (_e, base64Audio, mimeType, isPartial = false) => {
     try {
       const response = await apiFetch('/ai/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64Audio, mimeType })
+        body: JSON.stringify({ base64Audio, mimeType, isPartial })
       });
 
       return await response.json();
@@ -777,13 +803,13 @@ function registerIPC() {
     }
   });
 
-  ipcMain.handle('generate-answer', async (e, question) => {
+  ipcMain.handle('generate-answer', async (e, { question, requestId }) => {
     const webContents = e.sender;
     try {
       const response = await apiFetch('/ai/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question })
+        body: JSON.stringify({ question, ...candidateProfile })
       });
 
       if (!response.ok) {
@@ -791,48 +817,38 @@ function registerIPC() {
         return { success: false, error: errorData.error || 'AI request failed' };
       }
 
-      // Stream SSE response chunks from backend to Electron renderer
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       let fullAnswerText = '';
+      let streamError = null;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          const cleanLine = line.trim();
-          if (cleanLine.startsWith('data: ')) {
-            try {
-              const parsed = JSON.parse(cleanLine.slice(6));
-              if (parsed.chunk) {
-                fullAnswerText += parsed.chunk;
-                webContents.send('answer-chunk', parsed.chunk);
-              } else if (parsed.done) {
-                // Completed successfully
-              } else if (parsed.error) {
-                return { success: false, error: parsed.error };
-              }
-            } catch (err) {}
-          }
-        }
-      }
-
-      if (buffer && buffer.trim().startsWith('data: ')) {
+      const consumeLine = (line) => {
+        const cleanLine = line.trim();
+        if (!cleanLine.startsWith('data:')) return;
         try {
-          const parsed = JSON.parse(buffer.trim().slice(6));
+          const parsed = JSON.parse(cleanLine.slice(5).trim());
           if (parsed.chunk) {
             fullAnswerText += parsed.chunk;
-            webContents.send('answer-chunk', parsed.chunk);
+            webContents.send('answer-chunk', { requestId, chunk: parsed.chunk });
+          } else if (parsed.error) {
+            streamError = parsed.error;
           }
         } catch (err) {}
+      };
+
+      while (!streamError) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop();
+        lines.forEach(consumeLine);
       }
 
+      buffer += decoder.decode();
+      if (buffer) consumeLine(buffer);
+      if (streamError) return { success: false, error: streamError };
       return { success: true, answer: fullAnswerText };
     } catch (e) {
       return { success: false, error: e.message };
@@ -951,7 +967,9 @@ function registerIPC() {
       const pdfParse = require('pdf-parse');
       const buffer = fs.readFileSync(filePath);
       const data = await pdfParse(buffer);
-      return { success: true, text: data.text };
+      const text = String(data.text || '').trim();
+      if (!text) return { success: false, error: 'No readable text found in this PDF. Paste your resume text instead.' };
+      return { success: true, text };
     } catch (e) {
       return { success: false, error: e.message };
     }

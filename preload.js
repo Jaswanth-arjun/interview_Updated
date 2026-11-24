@@ -10,9 +10,17 @@ contextBridge.exposeInMainWorld('api', {
   parsePDF: (filePath) => ipcRenderer.invoke('parse-pdf', filePath),
 
   // AI & Audio
-  generateAnswer: (question) => ipcRenderer.invoke('generate-answer', question),
-  onAnswerChunk: (callback) => ipcRenderer.on('answer-chunk', (event, chunk) => callback(chunk)),
-  transcribeAudio: (base64Audio, mimeType) => ipcRenderer.invoke('transcribe-audio', base64Audio, mimeType),
+  generateAnswer: (question, onChunk) => {
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const listener = (event, payload) => {
+      if (payload.requestId === requestId && payload.chunk) onChunk(payload.chunk);
+    };
+    ipcRenderer.on('answer-chunk', listener);
+    return ipcRenderer.invoke('generate-answer', { question, requestId }).finally(() => {
+      ipcRenderer.removeListener('answer-chunk', listener);
+    });
+  },
+  transcribeAudio: (base64Audio, mimeType, isPartial = false) => ipcRenderer.invoke('transcribe-audio', base64Audio, mimeType, isPartial),
 
   // RAG Chat Assistant & LinkedIn
   sendChatMessage: (question, history, onChunk) => {

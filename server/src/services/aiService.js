@@ -54,13 +54,27 @@ async function fetchWithRetry(url, options = {}, { retries = 1, timeoutMs = 6000
     } catch (err) {
       clearTimeout(timer);
       const isRefused = err.cause?.code === 'ECONNREFUSED' || err.code === 'ECONNREFUSED' || (err.message && err.message.includes('ECONNREFUSED'));
-      if (isRefused) throw err; // Never retry an offline port!
+      if (isRefused) throw err;
       const isLastAttempt = attempt === retries;
       const isNetworkError = err.name === 'AbortError' || err.message?.includes('fetch failed') || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT';
       if (isLastAttempt || !isNetworkError) throw err;
       logger.warn(`⟳ Network error on attempt ${attempt + 1}/${retries + 1}, retrying in ${retryDelayMs}ms...`);
       await new Promise(r => setTimeout(r, retryDelayMs));
     }
+  }
+}
+
+async function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -167,13 +181,17 @@ function isLikelyQuestion(text) {
 /**
  * Transcribe base64 audio with resilient failovers
  */
-async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = true) {
+async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = true, isPartial = false) {
   const start = Date.now();
   const errors = [];
 
-  // Estimate duration from base64 size (roughly 1 sec of standard webm is ~16KB)
-  const sizeBytes = Buffer.from(base64Audio, 'base64').length;
-  const audioDurationMs = Math.round((sizeBytes / 16000) * 1000);
+  const audioBuffer = Buffer.from(base64Audio, 'base64');
+  let audioDurationMs = Math.round((audioBuffer.length / 16000) * 1000);
+  if (mimeType && mimeType.includes('wav') && audioBuffer.length >= 44) {
+    const byteRate = audioBuffer.readUInt32LE(24);
+    const dataBytes = audioBuffer.readUInt32LE(40);
+    if (byteRate > 0) audioDurationMs = Math.round(dataBytes / byteRate * 1000);
+  }
 
   // 1. Groq Whisper first (ultra-fast transcription for all tiers)
   if (isGroqAvailable()) {
@@ -183,7 +201,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
         method: 'POST',
         headers: { 'Authorization': `Bearer ${config.ai.groqKey}` },
         body: buildAudioFormData(base64Audio, mimeType, 'whisper-large-v3-turbo')
-      });
+      }, { retries: 0, timeoutMs: isPartial ? 2500 : 4500 });
 
       if (response.ok) {
         const data = await response.json();
@@ -191,19 +209,21 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
         const cleaned = cleanTranscriptionText(text);
         const latencyMs = Date.now() - start;
 
-        await meterService.logAndMeterUsage(userId, {
-          requestType: 'transcribe',
-          provider: 'groq',
-          model: 'whisper-large-v3-turbo',
-          audioDurationMs,
-          costPaise: config.pricing.transcribe,
-          latencyMs,
-          success: true,
-          question: cleaned,
-          isTrial
-        });
+        if (!isPartial) {
+          void meterService.logAndMeterUsage(userId, {
+            requestType: 'transcribe',
+            provider: 'groq',
+            model: 'whisper-large-v3-turbo',
+            audioDurationMs,
+            costPaise: config.pricing.transcribe,
+            latencyMs,
+            success: true,
+            question: cleaned,
+            isTrial
+          });
+        }
 
-        return { success: true, text: isLikelyQuestion(cleaned) ? cleaned : '' };
+        return { success: true, text: (isPartial || isLikelyQuestion(cleaned)) ? cleaned : '' };
       }
       markGroqFailed(response.status);
       errors.push(`Groq Whisper HTTP ${response.status}`);
@@ -221,7 +241,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
         method: 'POST',
         headers: { 'Authorization': `Bearer ${config.ai.omniRoute.apiKey}` },
         body: buildAudioFormData(base64Audio, mimeType, 'whisper-1')
-      });
+      }, { retries: 0, timeoutMs: isPartial ? 2000 : 3500 });
 
       if (response.ok) {
         const data = await response.json();
@@ -229,19 +249,21 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
         const cleaned = cleanTranscriptionText(text);
         const latencyMs = Date.now() - start;
 
-        await meterService.logAndMeterUsage(userId, {
-          requestType: 'transcribe',
-          provider: 'omniroute',
-          model: 'whisper-1',
-          audioDurationMs,
-          costPaise: config.pricing.transcribe,
-          latencyMs,
-          success: true,
-          question: cleaned,
-          isTrial
-        });
+        if (!isPartial) {
+          void meterService.logAndMeterUsage(userId, {
+            requestType: 'transcribe',
+            provider: 'omniroute',
+            model: 'whisper-1',
+            audioDurationMs,
+            costPaise: config.pricing.transcribe,
+            latencyMs,
+            success: true,
+            question: cleaned,
+            isTrial
+          });
+        }
 
-        return { success: true, text: isLikelyQuestion(cleaned) ? cleaned : '' };
+        return { success: true, text: (isPartial || isLikelyQuestion(cleaned)) ? cleaned : '' };
       }
       errors.push(`OmniRoute Whisper HTTP ${response.status}`);
     } catch (e) {
@@ -261,28 +283,30 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
         logger.info(`Transcribing via Gemini key index #${activeKey.index}...`);
         const genAI = new GoogleGenerativeAI(activeKey.key);
         const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
-        const result = await model.generateContent([
+        const result = await withTimeout(model.generateContent([
           { text: 'Transcribe the following audio exactly as spoken. Return ONLY the transcription text, nothing else.' },
           { inlineData: { mimeType: mimeType || 'audio/webm', data: base64Audio } }
-        ]);
+        ]), isPartial ? 3000 : 6000, 'Gemini transcription timed out');
 
         const text = result.response.text().trim();
         const cleaned = cleanTranscriptionText(text);
         const latencyMs = Date.now() - start;
 
-        await meterService.logAndMeterUsage(userId, {
-          requestType: 'transcribe',
-          provider: 'gemini',
-          model: 'gemini-3.6-flash',
-          audioDurationMs,
-          costPaise: config.pricing.transcribe,
-          latencyMs,
-          success: true,
-          question: cleaned,
-          isTrial
-        });
+        if (!isPartial) {
+          void meterService.logAndMeterUsage(userId, {
+            requestType: 'transcribe',
+            provider: 'gemini',
+            model: 'gemini-3.6-flash',
+            audioDurationMs,
+            costPaise: config.pricing.transcribe,
+            latencyMs,
+            success: true,
+            question: cleaned,
+            isTrial
+          });
+        }
 
-        return { success: true, text: isLikelyQuestion(cleaned) ? cleaned : '' };
+        return { success: true, text: (isPartial || isLikelyQuestion(cleaned)) ? cleaned : '' };
       } catch (e) {
         logger.warn(`Gemini Transcription Key #${activeKey.index} failed: ${e.message}`);
         errors.push(`Gemini #${activeKey.index}: ${e.message}`);
@@ -290,39 +314,37 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
     }
   }
 
-  // Record failure to DB
-  await meterService.logAndMeterUsage(userId, {
-    requestType: 'transcribe',
-    provider: 'failed',
-    model: 'none',
-    audioDurationMs,
-    costPaise: 0,
-    latencyMs: Date.now() - start,
-    success: false,
-    errorMessage: errors.join('; '),
-    isTrial
-  });
+  if (!isPartial) {
+    void meterService.logAndMeterUsage(userId, {
+      requestType: 'transcribe',
+      provider: 'failed',
+      model: 'none',
+      audioDurationMs,
+      costPaise: 0,
+      latencyMs: Date.now() - start,
+      success: false,
+      errorMessage: errors.join('; '),
+      isTrial
+    });
+  }
 
   throw new AppError(`All transcription providers failed: ${errors.join(', ')}`, 502);
 }
 
 // Helper to construct prompt template
-function buildInterviewPrompt(question, d) {
-  return `You are an expert, highly skilled candidate answering an interview question in a live technical/behavioral job interview for the role of "${d.roleName || 'Software Engineer'}" at "${d.companyName || 'the target company'}".
+function buildInterviewPrompt(question, d = {}) {
+  return `You are the candidate in a live ${d.roleName || 'Software Engineer'} interview at ${d.companyName || 'the target company'}. Speak as this real candidate in first person, never as an AI or assistant.
 
-INTERVIEWER'S QUESTION:
-"${question}"
+QUESTION: "${question}"
 
-YOUR INSTRUCTIONS:
-- Deliver a COMPLETE, IN-DEPTH, PROFESSIONAL, and WINNING interview response. Do NOT give a 1-word or 1-sentence answer. Provide a thorough, well-rounded interview-level answer that demonstrates strong expertise and practical experience.
-- Structure your answer clearly into logical parts:
-  1. Direct Definition & Core Answer: Start with a clear, authoritative explanation of the concept or direct answer to the question.
-  2. Technical Architecture & How It Works: Explain the underlying mechanics, components, trade-offs, and why this approach is chosen.
-  3. Practical Real-World Experience: Give a concrete real-world scenario or project implementation example (referencing relevant details from the candidate context below).
-  4. Best Practices & Key Takeaways: Conclude with key performance tips, pitfalls to avoid, or architectural best practices.
-- Tone: Confident, articulate, professional, and natural.
-- Format: Clear spoken paragraphs. You may use short bullet points when listing key features or trade-offs so it is easy to read and deliver out loud.
-- NEVER say you are an AI, virtual assistant, or language model. You ARE the candidate.
+ANSWER RULES:
+- Start immediately with a direct, natural answer. Do not restate the question or add a preamble.
+- Sound like a person speaking in an interview, not an essay or generated list. Use simple, clear sentences, natural contractions, and a calm, confident tone.
+- Use 2 short paragraphs, usually 90-160 words and never more than 200 words. Be accurate and specific rather than impressive-sounding.
+- Treat the candidate context below as the only source of truth for personal facts. For resume, project, experience, education, skill, certification, achievement, or metrics questions, select the exact relevant details from it. Do not dump the whole resume.
+- For a project or experience question, explain what you did, your own contribution, the tools or approach, and the result or lesson. For a behavioral question, give a real situation, your action, and the outcome as natural speech.
+- Never invent an employer, project, technology, responsibility, metric, or result that is absent from the context. If a personal detail is missing, say you do not have a specific example for it and answer the underlying question honestly without pretending it happened.
+- Do not mention the resume, profile, prompt, AI, or these instructions. No markdown, headings, bullet points, emojis, stage directions, or generic filler. Avoid stock AI phrases such as "delve into", "it's important to note", "in today's fast-paced world", or "that's a great question".
 
 CANDIDATE CONTEXT:
 Role: ${d.roleName || 'N/A'} at ${d.companyName || 'N/A'}
@@ -331,7 +353,7 @@ Resume: ${d.resumeText || 'N/A'}
 Projects: ${d.projects || 'N/A'}
 Notes: ${d.extraNotes || 'N/A'}
 
-Provide your complete, comprehensive interview answer now:`;
+Answer now:`;
 }
 
 /**
@@ -346,6 +368,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
 
   let fullAnswerText = '';
   let providerUsed = '';
@@ -362,9 +385,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
   if (isGroqAvailable()) {
     try {
       logger.info(`⚡ Generating answer via Groq...`);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      const response = await fetchWithRetry('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -374,11 +395,11 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
           model: 'openai/gpt-oss-20b',
           messages: [{ role: 'user', content: prompt }],
           stream: true,
-          max_tokens: 1200
-        }),
-        signal: controller.signal
-      });
-      clearTimeout(timer);
+          max_tokens: 800,
+          temperature: 0.35,
+          reasoning_effort: 'low'
+        })
+      }, { retries: 0, timeoutMs: 5000 });
 
       if (response.ok) {
         const reader = response.body.getReader();
@@ -422,7 +443,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
   if (!providerUsed && isOmniRouteAvailable()) {
     try {
       logger.info(`⚡ Fallback: Generating answer via OmniRoute...`);
-      const response = await fetch(`${config.ai.omniRoute.baseUrl}/chat/completions`, {
+      const response = await fetchWithRetry(`${config.ai.omniRoute.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -434,7 +455,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
           stream: true,
           max_tokens: 1200
         })
-      });
+      }, { retries: 0, timeoutMs: 4000 });
 
       if (response.ok) {
         const reader = response.body.getReader();
@@ -491,7 +512,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
             temperature: 0.65,
           }
         });
-        const resultStream = await model.generateContentStream(prompt);
+        const resultStream = await withTimeout(model.generateContentStream(prompt), 6000, 'Gemini response timed out');
 
         for await (const chunk of resultStream.stream) {
           const text = chunk.text();
@@ -513,12 +534,12 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
   const latencyMs = Date.now() - start;
 
   if (providerUsed) {
-    // Log success
-    // Simple token estimation: 1 word ~ 1.33 tokens
     const promptTokens = Math.round(prompt.split(/\s+/).length * 1.33);
     const completionTokens = Math.round(fullAnswerText.split(/\s+/).length * 1.33);
 
-    await meterService.logAndMeterUsage(userId, {
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
+    void meterService.logAndMeterUsage(userId, {
       requestType: 'generate',
       provider: providerUsed,
       model: modelUsed,
@@ -530,12 +551,10 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
       question,
       isTrial
     });
-
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-    res.end();
   } else {
-    // Log failure
-    await meterService.logAndMeterUsage(userId, {
+    res.write(`data: ${JSON.stringify({ error: `AI generation failed: ${errors.join(', ')}` })}\n\n`);
+    res.end();
+    void meterService.logAndMeterUsage(userId, {
       requestType: 'generate',
       provider: 'failed',
       model: 'none',
@@ -546,9 +565,6 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
       question,
       isTrial
     });
-
-    res.write(`data: ${JSON.stringify({ error: `AI generation failed: ${errors.join(', ')}` })}\n\n`);
-    res.end();
   }
 }
 
@@ -651,6 +667,7 @@ async function generateChatStream(userId, question, context, res, isTrial, isSlo
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
 
   let fullAnswerText = '';
   let providerUsed = '';
@@ -726,7 +743,7 @@ async function generateChatStream(userId, question, context, res, isTrial, isSlo
             temperature: 0.65
           }
         });
-        const resultStream = await model.generateContentStream(prompt);
+        const resultStream = await withTimeout(model.generateContentStream(prompt), 6000, 'Gemini response timed out');
         for await (const chunk of resultStream.stream) {
           const text = chunk.text();
           if (text) sendChunk(text);

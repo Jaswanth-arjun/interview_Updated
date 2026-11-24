@@ -6,9 +6,25 @@ const walletService = require('../services/walletService');
 const aiService = require('../services/aiService');
 const { AuthError, InsufficientBalanceError } = require('../utils/errors');
 const logger = require('../utils/logger');
+const { getMemoryProfile } = require('../services/authService');
 
 const router = express.Router();
 const prisma = require('../db/prisma');
+const PROFILE_FIELDS = ['resumeText', 'companyName', 'roleName', 'jobDescription', 'projects', 'extraNotes'];
+
+function pickProfileData(data = {}) {
+  return Object.fromEntries(PROFILE_FIELDS.map((field) => [field, typeof data[field] === 'string' ? data[field].trim() : '']));
+}
+
+async function getStoredProfile(userId) {
+  try {
+    const stored = await prisma.profileData.findUnique({ where: { userId } });
+    if (stored) return stored;
+  } catch (error) {
+    logger.warn('Profile DB lookup failed; using in-memory profile:', error.message);
+  }
+  return getMemoryProfile(userId);
+}
 
 /**
  * Helper to resolve user context (demo session vs. registered session).
@@ -51,14 +67,14 @@ async function resolveSessionContext(req) {
  */
 router.post('/transcribe', optionalAuth, aiLimiter, async (req, res, next) => {
   try {
-    const { base64Audio, mimeType } = req.body;
+    const { base64Audio, mimeType, isPartial = false } = req.body;
     if (!base64Audio) {
       return res.status(400).json({ success: false, error: 'Base64 audio payload is required' });
     }
 
     const session = await resolveSessionContext(req);
 
-    if (!session.isDemo) {
+    if (!session.isDemo && !isPartial) {
       // Enforce billing checks for logged-in accounts
       const quota = await walletService.checkQuota(session.userId, 'transcribe');
       if (!quota.allowed) {
@@ -71,7 +87,8 @@ router.post('/transcribe', optionalAuth, aiLimiter, async (req, res, next) => {
       base64Audio,
       mimeType,
       session.isTrial,
-      session.isSlow
+      session.isSlow,
+      isPartial
     );
 
     res.json(result);
@@ -86,14 +103,16 @@ router.post('/transcribe', optionalAuth, aiLimiter, async (req, res, next) => {
  */
 router.post('/generate', optionalAuth, aiLimiter, async (req, res, next) => {
   try {
-    const { question, resumeText, companyName, roleName, jobDescription, projects, extraNotes } = req.body;
+    const { question } = req.body;
     if (!question) {
       return res.status(400).json({ success: false, error: 'Question is required' });
     }
 
     const session = await resolveSessionContext(req);
-
-    let activeProfile = { resumeText, companyName, roleName, jobDescription, projects, extraNotes };
+    const providedProfile = pickProfileData(req.body);
+    const hasCompleteProfile = PROFILE_FIELDS.every((field) => Object.prototype.hasOwnProperty.call(req.body, field))
+      && PROFILE_FIELDS.some((field) => providedProfile[field]);
+    let activeProfile = providedProfile;
 
     if (!session.isDemo) {
       // 1. Enforce billing checks for registered accounts
@@ -102,12 +121,13 @@ router.post('/generate', optionalAuth, aiLimiter, async (req, res, next) => {
         return res.status(402).json({ success: false, error: quota.reason });
       }
 
-      // 2. Fetch stored profile from DB if not passed in body
-      if (!activeProfile.resumeText && !activeProfile.jobDescription) {
-        const stored = await prisma.profileData.findUnique({
-          where: { userId: session.userId }
-        });
-        if (stored) activeProfile = stored;
+      // 2. Fill missing context from the stored profile without delaying complete desktop requests.
+      if (!hasCompleteProfile) {
+        const stored = pickProfileData(await getStoredProfile(session.userId));
+        activeProfile = { ...stored };
+        for (const field of PROFILE_FIELDS) {
+          if (providedProfile[field]) activeProfile[field] = providedProfile[field];
+        }
       }
     }
 

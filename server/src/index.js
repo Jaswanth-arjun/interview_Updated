@@ -61,6 +61,14 @@ app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(apiLimiter);
 
 // ─── Application Routes ──────────────────────────────────────
+app.get('/', (req, res) => {
+  res.json({
+    status: 'online',
+    message: 'Interview Practice Assistant API Server is running successfully!',
+    health: '/health'
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',

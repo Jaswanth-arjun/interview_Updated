@@ -2,11 +2,13 @@
   "name": "interview-practice-assistant",
   "version": "1.0.0",
   "description": "On-screen interview practice assistant for mock interviews",
+  "author": "Jaswanth Arjun",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test tests/*.test.js",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "node scripts/dist.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
@@ -27,12 +29,16 @@
       "executableName": "RuntimeBroker"
     },
     "directories": {
-      "output": "dist"
+      "output": "release"
     },
     "files": [
       "**/*",
       "!landing/**/*",
-      "!server/**/*"
+      "!server/**/*",
+      "!tests/**/*",
+      "!dist/**/*",
+      "!release/**/*",
+      "!scripts/**/*"
     ]
   }
 }
