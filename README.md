@@ -224,7 +224,16 @@ Create a `.env` file in the `server` folder (refer to `server/.env.example`):
   - Minimum 900ms audio duration gate before sending to AI.
   - Screen never clears previous answers until a valid question is verified.
 
+### 4. Interviewer is not detected (especially with earphones/headphones)
+- **Cause**: The app fell back to the microphone because Windows system-audio loopback was not started. A microphone cannot hear audio that is playing inside your earphones.
+- **Solution**:
+  1. Click **Start Listening** once in the overlay (the first capture needs a user click on some Electron/Windows builds).
+  2. Keep the meeting audio on the **default Windows output device**; switching output devices is detected and recovered automatically.
+  3. The status must say **"Listening to interviewer voice..."**. If it says **"Microphone fallback"**, use speakers or restart listening after setting the correct default output.
+  4. Restart the local backend (`npm start` inside `server/`) after updating, and rebuild the desktop app with `npm run pack` (or `npm run dist`) if you run the packaged build.
+
 ---
 
 ## 📄 License
 Private & Confidential — Created for Interview Practice.
+

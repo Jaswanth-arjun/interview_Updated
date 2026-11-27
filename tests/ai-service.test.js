@@ -52,6 +52,56 @@ test('final transcription filters noise and meters without delaying the result',
   assert.equal(meterCalls[0].requestType, 'transcribe');
 });
 
+test('keeps real questions that start with interviewer filler', () => {
+  assert.equal(aiService.isLikelyQuestion('Okay, so can you tell me about yourself?'), true);
+  assert.equal(aiService.isLikelyQuestion('Thank you. Now, can you explain your project?'), true);
+  assert.equal(aiService.isLikelyQuestion('Right, walk me through your resume.'), true);
+  assert.equal(aiService.isLikelyQuestion('Why?'), true);
+  assert.equal(aiService.isLikelyQuestion('thank you very much'), false);
+  assert.equal(aiService.isLikelyQuestion('[BLANK_AUDIO]'), false);
+});
+
+test('cleaning preserves the question after courtesy phrases', () => {
+  assert.equal(aiService.cleanTranscriptionText('Thank you. Now, can you explain your project?'), 'Thank you. Now, can you explain your project?');
+  assert.equal(aiService.cleanTranscriptionText('you'), '');
+  assert.equal(aiService.cleanTranscriptionText('(upbeat music)'), '');
+});
+
+test('live preview rejects extreme noise metadata without metering', async () => {
+  meterCalls.length = 0;
+  global.fetch = async () => Response.json({
+    text: 'Tell me about yourself',
+    segments: [{ text: 'Tell me about yourself', no_speech_prob: 0.97, avg_logprob: -1.4 }],
+  });
+  const result = await aiService.transcribeAudio('demo-user', Buffer.alloc(128).toString('base64'), 'audio/wav', false, true, true);
+  assert.deepEqual(result, { success: true, text: '' });
+  assert.equal(meterCalls.length, 0);
+});
+
+test('final transcription rejects Whisper high-confidence noise hallucinations', async () => {
+  meterCalls.length = 0;
+  global.fetch = async () => Response.json({
+    text: 'Can you explain your experience?',
+    segments: [{ text: 'Can you explain your experience?', no_speech_prob: 0.96, avg_logprob: -1.3 }],
+  });
+  const result = await aiService.transcribeAudio('demo-user', Buffer.alloc(128).toString('base64'), 'audio/wav', false, true, false);
+  assert.deepEqual(result, { success: true, text: '' });
+});
+
+test('final transcription accepts confident speech and requests verbose metadata', async () => {
+  let responseFormat;
+  global.fetch = async (_url, options) => {
+    responseFormat = options.body.get('response_format');
+    return Response.json({
+      text: 'Can you explain your experience?',
+      segments: [{ text: 'Can you explain your experience?', no_speech_prob: 0.08, avg_logprob: -0.2 }],
+    });
+  };
+  const result = await aiService.transcribeAudio('demo-user', Buffer.alloc(128).toString('base64'), 'audio/wav', false, true, false);
+  assert.equal(result.text, 'Can you explain your experience?');
+  assert.equal(responseFormat, 'verbose_json');
+});
+
 test('answer streaming completes before slow usage logging', async () => {
   let releaseMeter;
   meterGate = new Promise((resolve) => { releaseMeter = resolve; });
@@ -94,9 +144,10 @@ test('answer streaming completes before slow usage logging', async () => {
   assert.equal(outcome, 'completed');
   assert.equal(ended, true);
   assert.equal(requestBody.reasoning_effort, 'low');
-  assert.equal(requestBody.max_tokens, 800);
+  assert.equal(requestBody.max_tokens, 450);
   assert.match(requestBody.messages[0].content, /first person/);
-  assert.match(requestBody.messages[0].content, /90-160 words/);
+  assert.match(requestBody.messages[0].content, /70-120 words/);
+  assert.match(requestBody.messages[0].content, /simple, everyday words/);
   assert.match(requestBody.messages[0].content, /No markdown/);
   assert.match(requestBody.messages[0].content, /only source of truth/);
   assert.match(requestBody.messages[0].content, /Never invent/);

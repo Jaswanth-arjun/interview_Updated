@@ -79,67 +79,115 @@ async function withTimeout(promise, timeoutMs, message) {
 }
 
 // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Transcription Cleaner (from main.js) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// Interviewers naturally start questions with "Okay, so...", "Right...",
+// "Thank you. Now..." etc. These discourse markers must be removed for
+// validation, but they must NEVER cause the actual question to be thrown away.
+const DISCOURSE_PREFIX = /^(?:(?:okay|ok|alright|all\s+right|right|so|well|now|um+|uh+|er+|ah+|eh+|yeah|yep|yes|no|nope|oh|hmm+|mm+|and|but)\b[\s,.;:!?\-–—]*)+/i;
+const COURTESY_PREFIX = /^(?:(?:thank\s+you(?:\s+(?:very\s+much|so\s+much|for\s+(?:that|your\s+time|watching)))?|thanks(?:\s+(?:a\s+lot|so\s+much|for\s+(?:that|your\s+time|watching)))?|great|good|nice|perfect|cool|awesome|excellent|sure|of\s+course)\b[\s,.;:!?\-–—]*)+/i;
+const PREAMBLE_PREFIX = /^(?:(?:the\s+question\s+is|my\s+question\s+is|what\s+i\s+(?:just\s+)?(?:wanted|want)\s+to\s+(?:ask|know)\s+is)[\s,.;:!?\-–—]*)+/i;
+const NOISE_TAG = /\[(?:blank_?audio|silence|music|applause|laughter|noise|inaudible|footsteps)[^\]]*\]|\((?:blank_?audio|silence|music|applause|laughter|noise|inaudible|upbeat[^)]*|dramatic[^)]*|soft[^)]*music[^)]*|background[^)]*)\)/gi;
+
+function stripNoiseTags(text) {
+  return String(text || '').replace(NOISE_TAG, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function stripDiscoursePrefix(text) {
+  let value = stripNoiseTags(text);
+  for (let i = 0; i < 4; i++) {
+    const next = value
+      .replace(COURTESY_PREFIX, '')
+      .replace(DISCOURSE_PREFIX, '')
+      .replace(PREAMBLE_PREFIX, '')
+      .replace(/^[\s,.;:!?\-–—]+/, '')
+      .trim();
+    if (next === value) break;
+    value = next;
+  }
+  return value;
+}
+
 function cleanTranscriptionText(text) {
   if (!text) return '';
-  const lower = text.toLowerCase().trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
-  const hallucinations = [
-    "thank you",
-    "thank you thank you",
-    "thank you very much",
-    "thank you for watching",
-    "subtitles by yify",
-    "please subscribe",
-    "subscribe to my channel",
-    "reformatted by",
-    "you"
-  ];
-  if (hallucinations.includes(lower)) {
-    return '';
-  }
+  let cleaned = stripNoiseTags(text);
+  if (!cleaned) return '';
 
-  let cleaned = text.replace(/\b(\w+)(?:\s+\1)+\b/gi, '$1');
-  const sentences = cleaned.split(/(?<=[.!?])\s+/);
+  // Collapse immediate repeated words ("what what is" -> "what is").
+  cleaned = cleaned.replace(/\b(\w+)(?:\s+\1\b){1,}/gi, '$1');
+
+  // De-duplicate repeated sentences from Whisper loops.
+  const sentences = cleaned.split(/(?<=[.!?])\s+/).filter(Boolean);
   const deduplicatedSentences = [];
-  let lastSentence = "";
-  let repeatCount = 0;
+  let lastNormalized = '';
   for (const sentence of sentences) {
-    const norm = sentence.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
-    const normLast = lastSentence.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
-    if (norm === normLast) {
-      repeatCount++;
-      if (repeatCount < 1) {
-        deduplicatedSentences.push(sentence);
-      }
-    } else {
-      deduplicatedSentences.push(sentence);
-      lastSentence = sentence;
-      repeatCount = 0;
-    }
+    const normalized = sentence.trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+    if (normalized && normalized === lastNormalized) continue;
+    deduplicatedSentences.push(sentence.trim());
+    lastNormalized = normalized;
   }
   cleaned = deduplicatedSentences.join(' ').trim();
-  
-  let cleanText = cleaned.trim();
-  let prev;
-  do {
-    prev = cleanText;
-    cleanText = cleanText.replace(/^(thank you|thanks|you|please subscribe|subscribe|thank you very much|reformatted by|subtitles by yify)[.,\s!?]*/gi, '');
-  } while (cleanText !== prev);
 
-  cleaned = cleanText.trim();
-  const words = cleaned.toLowerCase().split(/\s+/);
-  const uniqueWords = new Set(words);
-  if (words.length > 5 && uniqueWords.size === 1) {
-    return '';
-  }
-  if (words.length > 5 && uniqueWords.size === 2 && (uniqueWords.has('thank') || uniqueWords.has('you') || uniqueWords.has('thanks'))) {
+  const core = cleaned.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+  if (!core) return '';
+
+  // Only pure filler / sign-off hallucinations are dropped. A real question
+  // that starts with "thank you" or "okay" is kept intact.
+  const pureFiller = /^(?:okay|ok|alright|right|so|well|now|um+|uh+|yeah|yes|no|hi+|hello+|thanks?|thank you(?:\s+very\s+much)?|bye+|goodbye|see you|you|please subscribe|subscribe|subscribe to my channel|subtitles by yify|reformatted by)$/;
+  if (pureFiller.test(core)) return '';
+
+  const coreWords = core.split(' ');
+  if (coreWords.length > 3 && new Set(coreWords).size === 1) return '';
+  if (coreWords.length > 5 && new Set(coreWords).size === 2
+    && (core.includes('thank') || core.includes('subscribe') || core.includes('watching'))) {
     return '';
   }
 
   return cleaned;
 }
 
+// Reject noise/hallucinations while accepting every normal interview prompt.
+// The client applies the stricter "does this need an answer?" check; this
+// server-side check only removes obvious junk so questions are never lost.
+function isLikelyQuestion(text) {
+  const value = stripDiscoursePrefix(cleanTranscriptionText(text));
+  if (!value) return false;
+
+  const words = value.split(/\s+/).filter(Boolean);
+  if (!words.length) return false;
+  if (words.length === 1) {
+    const bareWord = words[0].replace(/[^a-z]/gi, '');
+    return /\?$/.test(value) && /^(what|why|how|when|where|which|who|whom|whose)$/i.test(bareWord);
+  }
+
+  if (value.length < 6) return false;
+  if (/^[\[(].*[\])]$/.test(value) && !value.includes('?')) return false;
+
+  const foreignChars = (value.match(/[^a-zA-Z0-9 .,?!'"“”‘’\-–—:;()&/$%@#+\n]/g) || []).length;
+  if (foreignChars / value.length > 0.06) return false;
+
+  const unique = new Set(words.map((word) => word.toLowerCase().replace(/[^a-z0-9']/g, '')).filter(Boolean));
+  if (words.length >= 6 && unique.size <= 2) return false;
+
+  if (/^(?:thank(s| you)?|bye+|goodbye|see you|hello+|hi+)\b/i.test(value) && words.length <= 3) return false;
+
+  return true;
+}
+
+function isReliableSpeechTranscription(data, { lenient = false } = {}) {
+  const segments = Array.isArray(data.segments)
+    ? data.segments.filter((segment) => String(segment.text || '').trim())
+    : [];
+  if (!segments.length) return true;
+  const noSpeechProbability = Math.max(...segments.map((segment) => Number(segment.no_speech_prob) || 0));
+  const averageLogProbability = Math.min(...segments.map((segment) =>
+    Number.isFinite(Number(segment.avg_logprob)) ? Number(segment.avg_logprob) : 0
+  ));
+  const noSpeechLimit = lenient ? 0.9 : 0.8;
+  const logProbLimit = lenient ? -1 : -0.8;
+  return !(noSpeechProbability >= noSpeechLimit && averageLogProbability <= logProbLimit);
+}
+
 // Helper to construct Whisper form data payload
-function buildAudioFormData(base64Audio, mimeType, modelName) {
+function buildAudioFormData(base64Audio, mimeType, modelName, isPartial = false) {
   const buffer = Buffer.from(base64Audio, 'base64');
   let ext = 'webm';
   if (mimeType && mimeType.includes('wav')) ext = 'wav';
@@ -155,27 +203,12 @@ function buildAudioFormData(base64Audio, mimeType, modelName) {
   // languages (e.g. Icelandic "Hvað er það?").
   formData.append('language', 'en');
   formData.append('temperature', '0');
-  formData.append('prompt', 'The speaker asks job interview questions in clear English.');
+  // Live previews only need the text and are on the latency-critical path, so
+  // skip the heavier verbose metadata there. Final decodes keep it for the
+  // no_speech/logprob reliability check.
+  formData.append('response_format', isPartial ? 'json' : 'verbose_json');
+  formData.append('prompt', 'A live job interview in clear English. The interviewer asks technical and behavioural questions such as "Tell me about yourself", "What is your experience with React?".');
   return formData;
-}
-
-// Filter out noise/hallucination transcriptions that are clearly NOT
-// real interviewer questions (e.g. random foreign-language gibberish,
-// single words picked from background sounds).
-function isLikelyQuestion(text) {
-  const t = (text || '').trim();
-  if (t.length < 8) return false;                        // too short (at least 8 chars, e.g. "Why Java?")
-  const words = t.split(/\s+/).filter(Boolean);
-  if (words.length < 2) return false;                    // at least 2 words (e.g. "Explain Redux")
-  // Reject non-English characters (foreign-language hallucinations like
-  // Icelandic _/d, CJK, Cyrillic etc.)
-  const foreignChars = (t.match(/[^a-zA-Z0-9 .,?!'"'\-:;()&/$%@#+\n]/g) || []).length;
-  if (foreignChars / t.length > 0.04) return false;
-  // Reject common Whisper hallucinations from fan/room background noise
-  // (filler words, greetings, sign-offs in any language)
-  const hallucination = /^(thank(s| you)?|thanks (for )?watching|okay+|ok|yeah|yes|no|hello+|hi+|bye+|tchau|obrigado|gracias|merci|arigato|danke|sorry|wow|umm*|hmm*|bye bye|see you|goodbye)\b/i;
-  if (hallucination.test(t)) return false;
-  return true;
 }
 
 /**
@@ -186,6 +219,8 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
   const errors = [];
 
   const audioBuffer = Buffer.from(base64Audio, 'base64');
+  // Live previews are short and frequent; a generous timeout here is the main
+  // reason results arrived late, so keep partial decodes tight.
   let audioDurationMs = Math.round((audioBuffer.length / 16000) * 1000);
   if (mimeType && mimeType.includes('wav') && audioBuffer.length >= 44) {
     const byteRate = audioBuffer.readUInt32LE(24);
@@ -200,7 +235,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
       const response = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${config.ai.groqKey}` },
-        body: buildAudioFormData(base64Audio, mimeType, 'whisper-large-v3-turbo')
+        body: buildAudioFormData(base64Audio, mimeType, 'whisper-large-v3-turbo', isPartial)
       }, { retries: 0, timeoutMs: isPartial ? 2500 : 4500 });
 
       if (response.ok) {
@@ -223,7 +258,8 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
           });
         }
 
-        return { success: true, text: (isPartial || isLikelyQuestion(cleaned)) ? cleaned : '' };
+        const reliable = isReliableSpeechTranscription(data, { lenient: isPartial });
+        return { success: true, text: (reliable && (isPartial || isLikelyQuestion(cleaned))) ? cleaned : '' };
       }
       markGroqFailed(response.status);
       errors.push(`Groq Whisper HTTP ${response.status}`);
@@ -240,7 +276,7 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
       const response = await fetchWithRetry(`${config.ai.omniRoute.baseUrl}/audio/transcriptions`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${config.ai.omniRoute.apiKey}` },
-        body: buildAudioFormData(base64Audio, mimeType, 'whisper-1')
+        body: buildAudioFormData(base64Audio, mimeType, 'whisper-1', isPartial)
       }, { retries: 0, timeoutMs: isPartial ? 2000 : 3500 });
 
       if (response.ok) {
@@ -263,7 +299,8 @@ async function transcribeAudio(userId, base64Audio, mimeType, isTrial, isSlow = 
           });
         }
 
-        return { success: true, text: (isPartial || isLikelyQuestion(cleaned)) ? cleaned : '' };
+        const reliable = isReliableSpeechTranscription(data, { lenient: isPartial });
+        return { success: true, text: (reliable && (isPartial || isLikelyQuestion(cleaned))) ? cleaned : '' };
       }
       errors.push(`OmniRoute Whisper HTTP ${response.status}`);
     } catch (e) {
@@ -339,8 +376,9 @@ QUESTION: "${question}"
 
 ANSWER RULES:
 - Start immediately with a direct, natural answer. Do not restate the question or add a preamble.
-- Sound like a person speaking in an interview, not an essay or generated list. Use simple, clear sentences, natural contractions, and a calm, confident tone.
-- Use 2 short paragraphs, usually 90-160 words and never more than 200 words. Be accurate and specific rather than impressive-sounding.
+- Sound like a person speaking in an interview, not an essay or generated list. Use very simple, everyday words and short sentences (about 8-14 words each). Keep a calm, confident tone.
+- If you use a technical term, explain it in one plain sentence right after it so anyone can follow.
+- Use 2 short paragraphs, usually 70-120 words and never more than 140 words. Be accurate and specific rather than impressive-sounding.
 - Treat the candidate context below as the only source of truth for personal facts. For resume, project, experience, education, skill, certification, achievement, or metrics questions, select the exact relevant details from it. Do not dump the whole resume.
 - For a project or experience question, explain what you did, your own contribution, the tools or approach, and the result or lesson. For a behavioral question, give a real situation, your action, and the outcome as natural speech.
 - Never invent an employer, project, technology, responsibility, metric, or result that is absent from the context. If a personal detail is missing, say you do not have a specific example for it and answer the underlying question honestly without pretending it happened.
@@ -395,7 +433,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
           model: 'openai/gpt-oss-20b',
           messages: [{ role: 'user', content: prompt }],
           stream: true,
-          max_tokens: 800,
+          max_tokens: 450,
           temperature: 0.35,
           reasoning_effort: 'low'
         })
@@ -453,7 +491,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
           model: config.ai.omniRoute.model,
           messages: [{ role: 'user', content: prompt }],
           stream: true,
-          max_tokens: 1200
+          max_tokens: 600
         })
       }, { retries: 0, timeoutMs: 4000 });
 
@@ -508,7 +546,7 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
         const model = genAI.getGenerativeModel({
           model: modelName,
           generationConfig: {
-            maxOutputTokens: 1200,
+            maxOutputTokens: 600,
             temperature: 0.65,
           }
         });
@@ -569,6 +607,8 @@ async function generateAnswerStream(userId, question, profileData, res, isTrial,
 }
 
 module.exports = {
+  cleanTranscriptionText,
+  isLikelyQuestion,
   transcribeAudio,
   generateAnswerStream,
   generateChatStream

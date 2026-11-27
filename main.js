@@ -26,10 +26,16 @@ let backendCachedAt = 0;
 
 async function getBackendUrl() {
   if (process.env.BACKEND_URL) return process.env.BACKEND_URL;
-  if (cachedBackendUrl && Date.now() - backendCachedAt < 30000) return cachedBackendUrl;
+  if (cachedBackendUrl) {
+    // A 30 s TTL made live question previews stall for up to 800 ms while the
+    // local probe ran again mid-interview. Keep the resolved backend much
+    // longer and probe it briefly.
+    const ttl = cachedBackendUrl === LOCAL_BACKEND_URL ? 10 * 1000 : 5 * 60 * 1000;
+    if (Date.now() - backendCachedAt < ttl) return cachedBackendUrl;
+  }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 800);
+  const timeoutId = setTimeout(() => controller.abort(), 250);
   try {
     const res = await fetch(`${LOCAL_BACKEND_URL}/health`, { signal: controller.signal });
     if (res.ok) {
@@ -526,6 +532,25 @@ function startOauthListener(resolve) {
 function registerIPC() {
   ipcMain.handle('get-machine-id', async () => {
     return getDeviceFingerprint();
+  });
+
+  // Used by the overlay as a fallback system-audio path when getDisplayMedia
+  // returns an empty audio track on some Windows/Electron combinations.
+  ipcMain.handle('get-desktop-sources', async () => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: 0, height: 0 }
+      });
+      return sources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        display_id: source.display_id
+      }));
+    } catch (error) {
+      console.warn('Failed to enumerate desktop sources:', error.message);
+      return [];
+    }
   });
 
   ipcMain.handle('get-local-session', async () => {

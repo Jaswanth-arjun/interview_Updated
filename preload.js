@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('api', {
   openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
   parsePDF: (filePath) => ipcRenderer.invoke('parse-pdf', filePath),
 
+  // System-audio fallback
+  getDesktopSources: () => ipcRenderer.invoke('get-desktop-sources'),
+
   // AI & Audio
   generateAnswer: (question, onChunk) => {
     const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
